@@ -247,6 +247,15 @@ connect-key-changed-body = La chiave di { $host } non corrisponde a quella salva
 ## Pannello Connessioni
 connections = Connessioni
 tooltip-connections = Connessioni
+folder-size = Dimensione cartella
+move-to-trash = Sposta nel cestino
+open-path-in-new-tab = Apri percorso in una nuova scheda
+folder-size-loading = Calcolo delle dimensioni delle cartelle…
+folder-size-empty = Questa cartella è vuota
+folder-size-parent-share = % della cartella superiore
+folder-size-root-share = % della cartella analizzata
+folder-size-graph = Utilizzo
+folder-size-selected = { $count } cartelle selezionate
 connection-add = Aggiungi connessione
 connection-edit = Modifica connessione
 connection-save-only = Salva

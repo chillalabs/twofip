@@ -247,6 +247,15 @@ connect-key-changed-body = The key of { $host } doesn't match the one saved in ~
 ## Connections panel
 connections = Connections
 tooltip-connections = Connections
+folder-size = Folder Size
+move-to-trash = Move to Trash
+open-path-in-new-tab = Open Path in New Tab
+folder-size-loading = Calculating folder sizes…
+folder-size-empty = This folder is empty
+folder-size-parent-share = % of parent
+folder-size-root-share = % of folder
+folder-size-graph = Usage
+folder-size-selected = { $count } folders selected
 connection-add = Add connection
 connection-edit = Edit connection
 connection-save-only = Save

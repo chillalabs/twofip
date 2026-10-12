@@ -77,3 +77,39 @@ pub fn item_menu(
 
     Some(menu::items(keybinds, items))
 }
+
+/// The right-click menu for empty space in a file listing.
+pub fn background_menu(
+    keybinds: &HashMap<KeyBind, Action>,
+    can_paste: bool,
+) -> Option<Vec<menu::Tree<PaneMessage>>> {
+    let button = |label: String, icon_name: &'static str, action: Action| {
+        MenuItem::Button(label, Some(icon::from_name(icon_name).handle()), action)
+    };
+
+    let items = vec![
+        button(fl!("new-folder"), "folder-new-symbolic", Action::NewFolder),
+        if can_paste {
+            button(fl!("paste"), "edit-paste-symbolic", Action::Paste)
+        } else {
+            MenuItem::ButtonDisabled(
+                fl!("paste"),
+                Some(icon::from_name("edit-paste-symbolic").handle()),
+                Action::Paste,
+            )
+        },
+        MenuItem::Divider,
+        button(
+            fl!("select-all"),
+            "edit-select-all-symbolic",
+            Action::SelectAll,
+        ),
+        button(
+            fl!("tooltip-refresh"),
+            "view-refresh-symbolic",
+            Action::Refresh,
+        ),
+    ];
+
+    Some(menu::items(keybinds, items))
+}

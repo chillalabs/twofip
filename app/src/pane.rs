@@ -9,7 +9,7 @@ use cosmic::widget::{self, segmented_button, table};
 use cosmic::Element;
 
 use crate::app::{Message, PaneId};
-use crate::context_menu::item_menu;
+use crate::context_menu::{background_menu, item_menu};
 use crate::dnd::{FileList, TabDrag};
 use crate::file_item::{format_size, Column, FileItem, ListingOptions};
 use crate::fl;
@@ -620,9 +620,38 @@ impl PaneState {
     /// Opens a new active tab on `dir` with `view_mode` (and the current
     /// tab's column widths).
     fn open_tab(&mut self, dir: PathBuf, view_mode: ViewMode) -> Task<Message> {
+        self.open_tab_with_selection(dir, view_mode, None)
+    }
+
+    /// Opens a path in a new tab, leaving the current tab in place. For a
+    /// file, open its parent and select the file after the listing loads.
+    pub fn open_path_in_new_tab(&mut self, path: PathBuf) -> Task<Message> {
+        let (dir, selected) = if path.is_dir() {
+            (path, None)
+        } else {
+            let Some(parent) = path.parent().map(Path::to_path_buf) else {
+                return Task::none();
+            };
+            (parent, Some(path))
+        };
+        let view_mode = self
+            .tabs
+            .active_data::<TabState>()
+            .map(|tab_state| tab_state.view_mode)
+            .unwrap_or_default();
+        self.open_tab_with_selection(dir, view_mode, selected)
+    }
+
+    fn open_tab_with_selection(
+        &mut self,
+        dir: PathBuf,
+        view_mode: ViewMode,
+        selected: Option<PathBuf>,
+    ) -> Task<Message> {
         self.cancel_path_edit();
         let mut tab_state = TabState::new(dir.clone());
         tab_state.view_mode = view_mode;
+        tab_state.pending_select = selected.map(PendingSelect::Path);
         if let Some(current) = self.tabs.active_data::<TabState>() {
             tab_state.column_widths = current.column_widths;
         }
@@ -1083,6 +1112,17 @@ impl PaneState {
                         .width(Length::Fill)
                         .height(Length::Fill)
                         .class(drop_highlight_class(highlight));
+                    let background_menu = widget::context_menu(
+                        widget::container(widget::Space::new())
+                            .width(Length::Fill)
+                            .height(Length::Fill),
+                        background_menu(keybinds, can_paste),
+                    );
+                    let listing = cosmic::iced::widget::Stack::with_capacity(2)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .push(background_menu)
+                        .push(listing);
                     drop_target(listing, t.current_dir.clone(), false)
                 }
             }

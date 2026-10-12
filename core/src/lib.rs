@@ -4,6 +4,7 @@ pub mod drives;
 mod entry;
 mod error;
 pub mod favorites;
+pub mod folder_size;
 mod listing;
 pub mod mime;
 pub mod ops;

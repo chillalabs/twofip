@@ -26,6 +26,7 @@ use crate::connect::{ConnectState, ConnectStatus};
 use crate::file_item::{format_modified, format_size, ListingOptions};
 use crate::find::{FindState, FindStatus};
 use crate::fl;
+use crate::folder_size::Panel as FolderSizePanel;
 use crate::keybinds::{default_keybinds, Action};
 use crate::launch::{self, AppEntry, OpenMode};
 use crate::localize;
@@ -103,6 +104,14 @@ pub enum Message {
     ExternalDrop(Vec<PathBuf>),
     DetailsLoaded(Vec<PathBuf>, Result<Details, String>),
     CloseDetails,
+    FolderSizeLoaded(PaneId, PathBuf, Result<fs_ops::folder_size::Entry, String>),
+    FolderSizeToggle(PaneId, PathBuf),
+    FolderSizeSelect(PaneId, PathBuf),
+    FolderSizeHover(PaneId, Option<(PathBuf, String, String)>),
+    FolderSizeContextOpen(PaneId, PathBuf),
+    FolderSizeMoveToTrash(PaneId),
+    FolderSizeOpenInNewTab(PaneId),
+    FolderSizeClose,
     ShowHiddenFilesToggled(bool),
     ThumbnailsToggled(bool),
     SeparateExtensionToggled(bool),
@@ -440,6 +449,7 @@ pub struct App {
     compress: Option<CompressState>,
     open_with: Option<OpenWithState>,
     details: Option<DetailsState>,
+    folder_size: Option<FolderSizePanel>,
     settings: Settings,
     user_dirs: Arc<HashMap<PathBuf, UserDir>>,
     drawer: Option<DrawerPage>,
@@ -503,6 +513,77 @@ impl App {
                 self.pane_mut(id).update(msg)
             }
             Message::Action(action) => self.handle_action(action),
+            Message::FolderSizeLoaded(target, root, result) => {
+                if let Some(panel) = self
+                    .folder_size
+                    .as_mut()
+                    .filter(|panel| panel.target == target && panel.root == root)
+                {
+                    panel.set_result(result);
+                }
+                Task::none()
+            }
+            Message::FolderSizeToggle(target, path) => {
+                self.set_active_pane(target);
+                if let Some(panel) = self.folder_size.as_mut() {
+                    panel.toggle(path);
+                }
+                Task::none()
+            }
+            Message::FolderSizeSelect(target, path) => {
+                self.set_active_pane(target);
+                if let Some(panel) = self.folder_size.as_mut() {
+                    panel.select(path);
+                }
+                Task::none()
+            }
+            Message::FolderSizeHover(target, hovered) => {
+                if let Some(panel) = self
+                    .folder_size
+                    .as_mut()
+                    .filter(|panel| panel.target == target)
+                {
+                    panel.set_hovered(hovered);
+                }
+                Task::none()
+            }
+            Message::FolderSizeContextOpen(target, path) => {
+                self.set_active_pane(target);
+                if let Some(panel) = self.folder_size.as_mut() {
+                    panel.set_context_path(path);
+                }
+                Task::none()
+            }
+            Message::FolderSizeMoveToTrash(target) => {
+                let Some(path) = self
+                    .folder_size
+                    .as_mut()
+                    .filter(|panel| panel.target == target)
+                    .and_then(FolderSizePanel::take_context_path)
+                else {
+                    return Task::none();
+                };
+                self.set_active_pane(target);
+                self.delete_permanently = fs_ops::vfs::is_remote(&path);
+                self.confirm_delete = Some(vec![path]);
+                self.focus_delete_button(true)
+            }
+            Message::FolderSizeOpenInNewTab(target) => {
+                let Some(path) = self
+                    .folder_size
+                    .as_mut()
+                    .filter(|panel| panel.target == target)
+                    .and_then(FolderSizePanel::take_context_path)
+                else {
+                    return Task::none();
+                };
+                self.set_active_pane(target);
+                self.pane_mut(target).open_path_in_new_tab(path)
+            }
+            Message::FolderSizeClose => {
+                self.folder_size = None;
+                Task::none()
+            }
             Message::ExitNow => self.exit_now(),
             Message::ActivatePane(id) => {
                 self.set_active_pane(id);
@@ -642,11 +723,15 @@ impl App {
                 }
                 OpEvent::Done => {
                     self.operation = None;
-                    self.reload_both_panes()
+                    let reload = self.reload_both_panes();
+                    let folder_size = self.refresh_folder_size();
+                    Task::batch([reload, folder_size])
                 }
                 OpEvent::Cancelled => {
                     self.operation = None;
-                    self.reload_both_panes()
+                    let reload = self.reload_both_panes();
+                    let folder_size = self.refresh_folder_size();
+                    Task::batch([reload, folder_size])
                 }
                 OpEvent::Error(err) => {
                     if let Some(op) = &mut self.operation {
@@ -1408,6 +1493,7 @@ impl App {
             Action::CalculateSize => self
                 .pane_mut(self.active_pane)
                 .update(PaneMessage::CalculateDirSizes),
+            Action::FolderSize => self.open_folder_size(),
             Action::SelectFirst
             | Action::SelectLast
             | Action::ExtendSelectionToFirst
@@ -2372,9 +2458,11 @@ impl App {
     #[cfg(windows)]
     fn show_shell_menu(&mut self, id: PaneId) -> Task<Message> {
         let paths = self.pane(id).selected_paths();
-        match crate::shell_menu::show(&paths) {
-            Some(action) => self.handle_action(action),
-            None => Task::none(),
+        let paste_destination = (paths.len() == 1 && paths[0].is_dir()).then(|| paths[0].clone());
+        match (crate::shell_menu::show(&paths), paste_destination) {
+            (Some(Action::Paste), Some(dest)) => self.paste_to(dest),
+            (Some(action), _) => self.handle_action(action),
+            (None, _) => Task::none(),
         }
     }
 
@@ -2402,16 +2490,67 @@ impl App {
         }
     }
 
+    fn open_folder_size(&mut self) -> Task<Message> {
+        if self
+            .folder_size
+            .as_ref()
+            .is_some_and(|panel| panel.target == self.active_pane)
+        {
+            self.folder_size = None;
+            return Task::none();
+        }
+        let Some(root) = self.pane(self.active_pane).selected_single_dir() else {
+            return Task::none();
+        };
+        if fs_ops::vfs::is_remote(&root) {
+            return Task::none();
+        }
+
+        let target = self.active_pane.other();
+        self.folder_size = Some(FolderSizePanel::loading(
+            target,
+            root.clone(),
+            self.listing_options(),
+        ));
+        let scan_root = root.clone();
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || fs_ops::folder_size::scan(&scan_root))
+                .await
+                .unwrap_or_else(|err| Err(format!("folder size task failed: {err}")));
+            Message::FolderSizeLoaded(target, root, result)
+        })
+    }
+
+    fn refresh_folder_size(&mut self) -> Task<Message> {
+        let Some(panel) = self.folder_size.as_mut() else {
+            return Task::none();
+        };
+        panel.start_refresh();
+        let target = panel.target;
+        let root = panel.root.clone();
+        let scan_root = root.clone();
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || fs_ops::folder_size::scan(&scan_root))
+                .await
+                .unwrap_or_else(|err| Err(format!("folder size task failed: {err}")));
+            Message::FolderSizeLoaded(target, root, result)
+        })
+    }
+
     /// Copies (or, after a Cut, moves) the clipboard's paths into the active
     /// pane's current folder.
     fn paste(&mut self) -> Task<Message> {
+        let dest = self.pane(self.active_pane).current_dir();
+        self.paste_to(dest)
+    }
+
+    fn paste_to(&mut self, dest: PathBuf) -> Task<Message> {
         if self.operation.is_some() {
             return Task::none();
         }
         let Some(clipboard) = &self.clipboard else {
             return Task::none();
         };
-        let dest = self.pane(self.active_pane).current_dir();
         if !clipboard.cut {
             let sources = clipboard.paths.clone();
             return self.spawn_operation(OpKind::Copy, |cancel, conflict| {
@@ -2649,6 +2788,7 @@ impl Application for App {
             compress: None,
             open_with: None,
             details: None,
+            folder_size: None,
             settings,
             user_dirs,
             drawer: None,
@@ -2684,11 +2824,16 @@ impl Application for App {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Message>> {
+        let selected_folder = self.pane(self.active_pane).selected_single_dir();
+        let can_folder_size = selected_folder
+            .as_ref()
+            .is_some_and(|path| !fs_ops::vfs::is_remote(path));
         menu_bar(
             &self.keybinds,
             self.clipboard.is_some(),
             self.pane(self.active_pane).view_mode(),
             fs_ops::vfs::is_remote(&self.pane(self.active_pane).current_dir()),
+            can_folder_size,
         )
     }
 
@@ -3080,24 +3225,30 @@ impl Application for App {
         // How a click on a file changes the selection (Ctrl / Shift held).
         let select_mode = SelectMode::from_modifiers(self.modifiers);
         let can_paste = self.clipboard.is_some();
-        let left = self
-            .left
-            .view(
-                self.active_pane == PaneId::Left,
-                select_mode,
-                &self.keybinds,
-                can_paste,
-            )
-            .map(|msg| Message::Pane(PaneId::Left, msg));
-        let right = self
-            .right
-            .view(
-                self.active_pane == PaneId::Right,
-                select_mode,
-                &self.keybinds,
-                can_paste,
-            )
-            .map(|msg| Message::Pane(PaneId::Right, msg));
+        let left = match self.folder_size.as_ref() {
+            Some(panel) if panel.target == PaneId::Left => panel.view(),
+            _ => self
+                .left
+                .view(
+                    self.active_pane == PaneId::Left,
+                    select_mode,
+                    &self.keybinds,
+                    can_paste,
+                )
+                .map(|msg| Message::Pane(PaneId::Left, msg)),
+        };
+        let right = match self.folder_size.as_ref() {
+            Some(panel) if panel.target == PaneId::Right => panel.view(),
+            _ => self
+                .right
+                .view(
+                    self.active_pane == PaneId::Right,
+                    select_mode,
+                    &self.keybinds,
+                    can_paste,
+                )
+                .map(|msg| Message::Pane(PaneId::Right, msg)),
+        };
 
         let panes = widget::Row::new()
             .spacing(PANE_GAP)

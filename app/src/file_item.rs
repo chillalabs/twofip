@@ -129,6 +129,19 @@ impl FileItem {
     }
 }
 
+/// The themed file or folder icon used by the Folder Size hierarchy.
+pub fn icon_for_path(path: &Path, is_dir: bool, options: &ListingOptions) -> icon::Handle {
+    let kind = if is_dir {
+        EntryKind::Dir
+    } else {
+        EntryKind::File
+    };
+    let mime = (kind == EntryKind::File)
+        .then(|| fs_ops::thumbnail::guess_mime(path))
+        .flatten();
+    icon_handle(kind, path, mime.as_deref(), options)
+}
+
 /// The themed icon for an entry: its file type's icon (e.g. `application-pdf`,
 /// falling back to the type family like `image-x-generic`), or the special
 /// icon of a well-known folder; colorful or monochrome (`-symbolic`).

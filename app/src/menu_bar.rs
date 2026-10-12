@@ -34,6 +34,7 @@ pub fn menu_bar<'a>(
     can_paste: bool,
     view_mode: ViewMode,
     on_server: bool,
+    can_folder_size: bool,
 ) -> Vec<Element<'a, Message>> {
     // Same shortcuts, re-keyed to the wrapper so the menu can show them.
     let keybinds: HashMap<KeyBind, TopMenuAction> = keybinds
@@ -171,6 +172,19 @@ pub fn menu_bar<'a>(
         .class(cosmic::theme::Container::custom(tooltip_style))
     };
 
+    let folder_size = widget::tooltip(
+        widget::button::custom(
+            icon::from_svg_bytes(include_bytes!("../resources/icons/folder-size.svg"))
+                .symbolic(true)
+                .icon()
+                .size(18),
+        )
+        .on_press_maybe(can_folder_size.then_some(Message::Action(Action::FolderSize))),
+        widget::text(fl!("folder-size")),
+        widget::tooltip::Position::Bottom,
+    )
+    .class(cosmic::theme::Container::custom(tooltip_style));
+
     vec![
         bar.into(),
         widget::container(separator)
@@ -190,6 +204,7 @@ pub fn menu_bar<'a>(
             Action::Connections,
         )
         .into(),
+        folder_size.into(),
     ]
 }
 

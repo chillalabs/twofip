@@ -38,6 +38,8 @@ pub enum Action {
     ExtendSelectionUp,
     /// Space: calculate the total size of the selected folders.
     CalculateSize,
+    /// Shows the selected folder's contents and recursive sizes in the other pane.
+    FolderSize,
     /// Home / End: first / last item; with Shift, extend the selection there.
     SelectFirst,
     SelectLast,

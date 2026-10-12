@@ -247,6 +247,15 @@ connect-key-changed-body = Der Schlüssel von { $host } passt nicht zu dem in ~/
 ## Seitenleiste Verbindungen
 connections = Verbindungen
 tooltip-connections = Verbindungen
+folder-size = Ordnergröße
+move-to-trash = In den Papierkorb verschieben
+open-path-in-new-tab = Pfad in neuem Tab öffnen
+folder-size-loading = Ordnergrößen werden berechnet…
+folder-size-empty = Dieser Ordner ist leer
+folder-size-parent-share = % des übergeordneten Ordners
+folder-size-root-share = % des analysierten Ordners
+folder-size-graph = Belegung
+folder-size-selected = { $count } Ordner ausgewählt
 connection-add = Verbindung hinzufügen
 connection-edit = Verbindung bearbeiten
 connection-save-only = Speichern

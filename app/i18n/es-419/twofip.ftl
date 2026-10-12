@@ -249,6 +249,15 @@ connect-key-changed-body = La clave de { $host } no coincide con la guardada en 
 ## Panel Conexiones
 connections = Conexiones
 tooltip-connections = Conexiones
+folder-size = Tamaño de carpeta
+move-to-trash = Mover a la papelera
+open-path-in-new-tab = Abrir ruta en una pestaña nueva
+folder-size-loading = Calculando tamaños de carpetas…
+folder-size-empty = Esta carpeta está vacía
+folder-size-parent-share = % de la carpeta superior
+folder-size-root-share = % de la carpeta analizada
+folder-size-graph = Uso
+folder-size-selected = { $count } carpetas seleccionadas
 connection-add = Agregar conexión
 connection-edit = Editar conexión
 connection-save-only = Guardar

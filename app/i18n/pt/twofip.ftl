@@ -105,6 +105,13 @@ connect-key-changed-body = A chave de { $host } não corresponde à guardada em 
 ## Painel Ligações
 connections = Ligações
 tooltip-connections = Ligações
+folder-size = Tamanho da pasta
+folder-size-loading = A calcular tamanhos das pastas…
+folder-size-empty = Esta pasta está vazia
+folder-size-parent-share = % da pasta superior
+folder-size-root-share = % da pasta analisada
+folder-size-graph = Utilização
+folder-size-selected = { $count } pastas selecionadas
 connection-add = Adicionar ligação
 connection-edit = Editar ligação
 connection-save-only = Guardar

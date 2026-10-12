@@ -249,6 +249,15 @@ connect-key-changed-body = A chave de { $host } não corresponde à salva em ~/.
 ## Painel Conexões
 connections = Conexões
 tooltip-connections = Conexões
+folder-size = Tamanho da pasta
+move-to-trash = Mover para a lixeira
+open-path-in-new-tab = Abrir caminho em nova aba
+folder-size-loading = Calculando tamanhos das pastas…
+folder-size-empty = Esta pasta está vazia
+folder-size-parent-share = % da pasta superior
+folder-size-root-share = % da pasta analisada
+folder-size-graph = Uso
+folder-size-selected = { $count } pastas selecionadas
 connection-add = Adicionar conexão
 connection-edit = Editar conexão
 connection-save-only = Salvar
