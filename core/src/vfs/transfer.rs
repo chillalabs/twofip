@@ -75,6 +75,53 @@ enum Stop {
     Error(String),
 }
 
+fn default_renamed_name(dest: &Path) -> String {
+    let Some(file_name) = dest.file_name().and_then(|name| name.to_str()) else {
+        return "copy".to_string();
+    };
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} (1).{ext}"),
+        None => format!("{stem} (1)"),
+    }
+}
+
+fn append_name_index(name: &str, index: usize) -> String {
+    let path = Path::new(name);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(name);
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} ({index}).{ext}"),
+        None => format!("{stem} ({index})"),
+    }
+}
+
+async fn resolve_renamed_destination(dest: &Path, requested_name: &str) -> PathBuf {
+    let parent = dest.parent().unwrap_or(Path::new("."));
+    let mut candidate_name = requested_name.trim().to_string();
+    if candidate_name.is_empty() {
+        candidate_name = default_renamed_name(dest);
+    }
+
+    let mut candidate = parent.join(&candidate_name);
+    let mut index = 1usize;
+    while candidate == dest || exists(&candidate).await.unwrap_or(false) {
+        candidate = parent.join(append_name_index(&candidate_name, index));
+        index += 1;
+    }
+    candidate
+}
+
 impl From<String> for Stop {
     fn from(message: String) -> Self {
         Stop::Error(message)
@@ -114,6 +161,7 @@ async fn copy_all(
             make_dirs(&item.dest).await?;
             continue;
         }
+        let mut destination = item.dest.clone();
         if !replace_all && exists(&item.dest).await? {
             let skip = if skip_all {
                 true
@@ -130,6 +178,10 @@ async fn copy_all(
                         replace_all = true;
                         false
                     }
+                    ConflictResolution::Rename(name) => {
+                        destination = resolve_renamed_destination(&item.dest, &name).await;
+                        false
+                    }
                     ConflictResolution::Skip => true,
                     ConflictResolution::SkipAll => {
                         skip_all = true;
@@ -143,7 +195,7 @@ async fn copy_all(
                 continue;
             }
         }
-        if let Some(parent) = super::parent(&item.dest) {
+        if let Some(parent) = super::parent(&destination) {
             make_dirs(&parent).await?;
         }
 
@@ -151,7 +203,7 @@ async fn copy_all(
         let start_bytes = bytes_done;
         let mut last_sent = Instant::now() - Duration::from_secs(1);
         let progress_tx = tx.clone();
-        let current = item.dest.clone();
+        let current = destination.clone();
         let mut on_progress = move |copied: u64| {
             if last_sent.elapsed() >= Duration::from_millis(100) {
                 last_sent = Instant::now();
@@ -165,7 +217,7 @@ async fn copy_all(
             }
         };
         let cancelled = || cancel.is_cancelled();
-        let result = copy_file(&item.src, &item.dest, &mut on_progress, &cancelled).await;
+        let result = copy_file(&item.src, &destination, &mut on_progress, &cancelled).await;
         if cancel.is_cancelled() {
             return Err(Stop::Cancelled);
         }
@@ -175,7 +227,7 @@ async fn copy_all(
         bytes_done += item.size;
         let _ = tx
             .send(OpEvent::Progress(OpProgress {
-                current_file: item.dest.clone(),
+                current_file: destination,
                 files_done,
                 files_total,
                 bytes_done,
@@ -224,6 +276,20 @@ async fn rename_all(
             match conflict.ask().await {
                 ConflictResolution::Replace => {}
                 ConflictResolution::ReplaceAll => replace_all = true,
+                ConflictResolution::Rename(name) => {
+                    let chosen = resolve_renamed_destination(&dest, &name).await;
+                    super::rename(source, &chosen).await?;
+                    let _ = tx
+                        .send(OpEvent::Progress(OpProgress {
+                            current_file: chosen,
+                            files_done: index + 1,
+                            files_total,
+                            bytes_done: 0,
+                            bytes_total: 0,
+                        }))
+                        .await;
+                    continue;
+                }
                 ConflictResolution::Skip => continue,
                 ConflictResolution::SkipAll => {
                     skip_all = true;

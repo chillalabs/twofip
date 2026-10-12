@@ -8,6 +8,8 @@ op-progress = { $operation } { $percent } %
 
 settings-show-hidden-description = Archivos y carpetas cuyo nombre empieza por un punto
 settings-thumbnails-description = Vistas previas de imágenes, PDF, vídeos y fuentes
+settings-windows-style = Apariencia de Windows
+settings-windows-style-description = Usa un estilo más plano y similar a Windows con acento azul y superficies grises claras
 settings-icon-style = Estilo de iconos
 icon-style-monochrome = Monocromo
 

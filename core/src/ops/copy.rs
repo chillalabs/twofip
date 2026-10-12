@@ -203,6 +203,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn existing_destination_can_be_renamed() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("a.txt");
+        std::fs::write(&src_file, b"new").unwrap();
+        std::fs::write(dest_dir.path().join("a.txt"), b"old").unwrap();
+
+        let conflict = ConflictHandle::new();
+        let mut stream = copy(
+            vec![src_file],
+            dest_dir.path().to_path_buf(),
+            CancelHandle::new(),
+            conflict.clone(),
+        );
+
+        assert!(matches!(
+            stream.next().await,
+            Some(OpEvent::Conflict { .. })
+        ));
+        conflict.respond(ConflictResolution::Rename("a-copy.txt".to_string()));
+
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            events.push(event);
+        }
+        assert!(matches!(events.last(), Some(OpEvent::Done)));
+        assert_eq!(
+            std::fs::read(dest_dir.path().join("a-copy.txt")).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            std::fs::read(dest_dir.path().join("a.txt")).unwrap(),
+            b"old"
+        );
+    }
+
+    #[tokio::test]
     async fn refuses_to_copy_a_file_onto_itself() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("a.txt");

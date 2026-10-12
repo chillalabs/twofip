@@ -3,10 +3,12 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 /// How to resolve a single copy/move conflict where the destination already exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictResolution {
     Replace,
     ReplaceAll,
+    /// Copy the source item to a different file name in the same destination folder.
+    Rename(String),
     Skip,
     SkipAll,
 }

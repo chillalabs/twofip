@@ -72,6 +72,10 @@ pub enum Message {
     ConfirmRename,
     CancelRename,
     RenameFinished(Result<PathBuf, String>),
+    ConflictRenameInputChanged(String),
+    BeginConflictRename,
+    ConfirmConflictRename,
+    CancelConflictRename,
     NewFolderInputChanged(String),
     ConfirmNewFolder,
     CancelNewFolder,
@@ -102,6 +106,7 @@ pub enum Message {
     ShowHiddenFilesToggled(bool),
     ThumbnailsToggled(bool),
     SeparateExtensionToggled(bool),
+    WindowsStyleToggled(bool),
     /// Index into [`localize::LANGUAGES`]; applied immediately.
     LanguageSelected(usize),
     /// Index into [`ICON_STYLES`].
@@ -184,6 +189,21 @@ fn corners_name(corners: Corners) -> String {
     }
 }
 
+fn suggested_conflict_rename_name(path: &PathBuf) -> String {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return "copy".to_string();
+    };
+    let file_path = std::path::Path::new(file_name);
+    let stem = file_path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match file_path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} (1).{ext}"),
+        None => format!("{stem} (1)"),
+    }
+}
+
 /// File name sizes offered in Settings, in dropdown order.
 const FONT_SIZES: [FontSize; 4] = [
     FontSize::Default,
@@ -219,17 +239,19 @@ pub enum SettingsRow {
     Thumbnails,
     Language,
     ColorTheme,
+    WindowsStyle,
     Corners,
     IconStyle,
     FontSize,
 }
 
-const SETTINGS_ROWS: [SettingsRow; 8] = [
+const SETTINGS_ROWS: [SettingsRow; 9] = [
     SettingsRow::ShowHidden,
     SettingsRow::SeparateExtension,
     SettingsRow::Thumbnails,
     SettingsRow::Language,
     SettingsRow::ColorTheme,
+    SettingsRow::WindowsStyle,
     SettingsRow::Corners,
     SettingsRow::IconStyle,
     SettingsRow::FontSize,
@@ -350,6 +372,11 @@ struct RenameState {
     name: String,
 }
 
+struct ConflictRenameState {
+    path: PathBuf,
+    name: String,
+}
+
 struct NewFolderState {
     name: String,
 }
@@ -369,6 +396,7 @@ pub struct App {
     new_folder: Option<NewFolderState>,
     /// Set while `self.operation` has an `OpEvent::Conflict` awaiting an answer.
     pending_conflict: Option<(PathBuf, PathBuf)>,
+    conflict_rename: Option<ConflictRenameState>,
     favorites: Vec<Favorite>,
     /// The Favorites panel's name field; empty means "use the folder's name".
     favorite_name: String,
@@ -684,6 +712,36 @@ impl App {
                 }
                 self.reload_both_panes()
             }
+            Message::ConflictRenameInputChanged(value) => {
+                if let Some(rename) = &mut self.conflict_rename {
+                    rename.name = value;
+                }
+                Task::none()
+            }
+            Message::BeginConflictRename => {
+                let Some((_, dest)) = self.pending_conflict.clone() else {
+                    return Task::none();
+                };
+                self.conflict_rename = Some(ConflictRenameState {
+                    path: dest.clone(),
+                    name: suggested_conflict_rename_name(&dest),
+                });
+                Task::none()
+            }
+            Message::ConfirmConflictRename => {
+                let Some(rename) = self.conflict_rename.take() else {
+                    return Task::none();
+                };
+                self.pending_conflict = None;
+                if let Some(op) = &self.operation {
+                    op.conflict.respond(ConflictResolution::Rename(rename.name));
+                }
+                Task::none()
+            }
+            Message::CancelConflictRename => {
+                self.conflict_rename = None;
+                Task::none()
+            }
             Message::NewFolderInputChanged(value) => {
                 if let Some(new_folder) = &mut self.new_folder {
                     new_folder.name = value;
@@ -869,6 +927,12 @@ impl App {
                 self.focus_settings_row(SettingsRow::Thumbnails);
                 self.settings.show_thumbnails = show;
                 self.apply_settings()
+            }
+            Message::WindowsStyleToggled(windows_style) => {
+                self.focus_settings_row(SettingsRow::WindowsStyle);
+                self.settings.windows_style = windows_style;
+                self.persist_settings();
+                return self.apply_color_theme();
             }
             Message::LanguageSelected(index) => {
                 self.focus_settings_row(SettingsRow::Language);
@@ -1524,13 +1588,18 @@ impl App {
     /// "System" goes back to the desktop's current theme (libcosmic keeps it
     /// up to date meanwhile).
     fn apply_color_theme(&self) -> Task<Message> {
-        let theme = match self.settings.color_theme {
-            ColorTheme::System => self.core.system_theme().clone(),
-            ColorTheme::Light => cosmic::Theme::light(),
-            ColorTheme::Dark => cosmic::Theme::dark(),
-            own => themes::build(own).unwrap_or_else(cosmic::Theme::dark),
+        let theme = if self.settings.windows_style {
+            themes::windows_like()
+        } else {
+            match self.settings.color_theme {
+                ColorTheme::System => self.core.system_theme().clone(),
+                ColorTheme::Light => cosmic::Theme::light(),
+                ColorTheme::Dark => cosmic::Theme::dark(),
+                own => themes::build(own).unwrap_or_else(cosmic::Theme::dark),
+            }
         };
-        let system = self.settings.color_theme == ColorTheme::System;
+        let system =
+            !self.settings.windows_style && self.settings.color_theme == ColorTheme::System;
         cosmic::command::set_theme(themes::with_corners(&theme, self.settings.corners, system))
     }
 
@@ -1631,6 +1700,7 @@ impl App {
                     .unwrap_or(0);
                 Message::ColorThemeSelected(step_index(current, step, COLOR_THEMES.len()))
             }
+            SettingsRow::WindowsStyle => Message::WindowsStyleToggled(!self.settings.windows_style),
             SettingsRow::Corners => {
                 let current = CORNERS
                     .iter()
@@ -2156,6 +2226,13 @@ impl App {
                         )),
                 ),
             )
+            .add(self.checkbox_row(
+                SettingsRow::WindowsStyle,
+                fl!("settings-windows-style"),
+                fl!("settings-windows-style-description"),
+                self.settings.windows_style,
+                Message::WindowsStyleToggled,
+            ))
             .add(
                 self.settings_row(
                     SettingsRow::Corners,
@@ -2545,6 +2622,7 @@ impl Application for App {
             rename: None,
             new_folder: None,
             pending_conflict: None,
+            conflict_rename: None,
             favorites: fs_ops::favorites::load(),
             favorite_name: String::new(),
             favorite_cursor: None,
@@ -2710,6 +2788,31 @@ impl Application for App {
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
+        if let Some(rename) = &self.conflict_rename {
+            return Some(
+                widget::dialog()
+                    .title(fl!("rename"))
+                    .body(fl!("renaming", name = tab_label(&rename.path)))
+                    .control(
+                        widget::text_input(fl!("new-name"), rename.name.as_str())
+                            .id(self.dialog_input.clone())
+                            .on_input(Message::ConflictRenameInputChanged)
+                            .on_submit(|_| Message::ConfirmConflictRename),
+                    )
+                    .primary_action(
+                        widget::button::suggested(fl!("rename"))
+                            .id(self.dialog_confirm.clone())
+                            .on_press(Message::ConfirmConflictRename),
+                    )
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel"))
+                            .id(self.dialog_cancel.clone())
+                            .on_press(Message::CancelConflictRename),
+                    )
+                    .into(),
+            );
+        }
+
         if let Some((src, dest)) = &self.pending_conflict {
             let body = fl!(
                 "conflict-body",
@@ -2728,6 +2831,9 @@ impl Application for App {
                     widget::button::standard(fl!("replace-all"))
                         .id(replace_all_id)
                         .on_press(Message::ResolveConflict(ConflictResolution::ReplaceAll)),
+                )
+                .push(
+                    widget::button::standard(fl!("rename")).on_press(Message::BeginConflictRename),
                 );
             return Some(
                 widget::dialog()

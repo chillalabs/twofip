@@ -1026,21 +1026,36 @@ impl PaneState {
                     widget::text(err.clone()).into()
                 } else {
                     let listing: Element<'_, PaneMessage> = match t.view_mode {
-                        ViewMode::List => widget::Column::new()
-                            .push(list_header(t, self.options.separate_extension))
-                            .push(widget::divider::horizontal::default())
-                            .push(
-                                widget::scrollable(list_view(
-                                    self,
-                                    t,
-                                    select_mode,
-                                    keybinds,
-                                    can_paste,
-                                ))
-                                .id(self.scroll_id.clone())
-                                .height(Length::Fill),
-                            )
-                            .into(),
+                        ViewMode::List => {
+                            // Needs the pane's width so Name never gets squeezed out.
+                            let keybinds = keybinds.clone();
+                            let scroll_id = self.scroll_id.clone();
+                            let separate_extension = self.options.separate_extension;
+                            widget::responsive(move |size| {
+                                let widths = fitted_widths(
+                                    t.column_widths,
+                                    list_columns(separate_extension),
+                                    size.width,
+                                );
+                                widget::Column::new()
+                                    .push(list_header(t, widths, separate_extension))
+                                    .push(widget::divider::horizontal::default())
+                                    .push(
+                                        widget::scrollable(list_view(
+                                            self,
+                                            t,
+                                            widths,
+                                            select_mode,
+                                            &keybinds,
+                                            can_paste,
+                                        ))
+                                        .id(scroll_id.clone())
+                                        .height(Length::Fill),
+                                    )
+                                    .into()
+                            })
+                            .into()
+                        }
                         ViewMode::Grid => {
                             // Needs the pane's width to know how many columns fit.
                             let keybinds = keybinds.clone();
@@ -1295,7 +1310,11 @@ fn name_text(text: String, font_size: FontSize) -> widget::Text<'static, cosmic:
 
 /// The list view's column headers; clicking one sorts by it (again to
 /// reverse), and the sort column shows an up/down arrow.
-fn list_header(tab_state: &TabState, separate_extension: bool) -> Element<'_, PaneMessage> {
+fn list_header(
+    tab_state: &TabState,
+    widths: ColumnWidths,
+    separate_extension: bool,
+) -> Element<'_, PaneMessage> {
     let (sort_column, ascending) = tab_state.sort();
     // Same horizontal layout as the rows below, so each label sits exactly
     // over its column: the rows are inset by the scroll area's padding plus
@@ -1331,7 +1350,7 @@ fn list_header(tab_state: &TabState, separate_extension: bool) -> Element<'_, Pa
             .on_press(PaneMessage::SortBy(column));
         header = header.push(
             widget::container(button)
-                .width(column_width(&tab_state.column_widths, column))
+                .width(column_width(&widths, column))
                 .clip(true),
         );
     }
@@ -1360,6 +1379,43 @@ fn column_width(widths: &ColumnWidths, column: Column) -> Length {
         Column::Modified => Length::Fixed(f32::from(widths.modified)),
     }
 }
+
+/// The column widths to draw in a list `pane_width` pixels wide: the tab's
+/// own, shrunk in proportion when Name would get less than
+/// [`MIN_NAME_WIDTH`] (e.g. in a small window), so Name always shows.
+fn fitted_widths(widths: ColumnWidths, columns: &[Column], pane_width: f32) -> ColumnWidths {
+    let fixed: Vec<Column> = columns
+        .iter()
+        .copied()
+        .filter(|column| *column != Column::Name)
+        .collect();
+    let width_of = |column: Column| match column {
+        Column::Name => 0,
+        Column::Ext => widths.ext,
+        Column::Size => widths.size,
+        Column::Modified => widths.modified,
+    };
+    let total: f32 = fixed
+        .iter()
+        .map(|column| f32::from(width_of(*column)))
+        .sum();
+    let padding = 2.0 * f32::from(LIST_SCROLL_PADDING + LIST_ROW_PADDING_X);
+    let gaps = f32::from(LIST_COLUMN_GAP) * fixed.len() as f32;
+    let available = (pane_width - padding - gaps - MIN_NAME_WIDTH).max(0.0);
+    if total <= available || total == 0.0 {
+        return widths;
+    }
+    let scale = available / total;
+    let shrink = |width: u16| (f32::from(width) * scale).floor() as u16;
+    ColumnWidths {
+        ext: shrink(widths.ext),
+        size: shrink(widths.size),
+        modified: shrink(widths.modified),
+    }
+}
+
+/// The least the Name column gets before the other columns shrink.
+const MIN_NAME_WIDTH: f32 = 160.0;
 
 /// Narrowest and widest a resized column can get, in pixels.
 const MIN_COLUMN_WIDTH: f32 = 40.0;
@@ -1408,6 +1464,7 @@ fn resized(start: ColumnWidths, columns: &[Column], divider: usize, dx: f32) -> 
 fn list_view<'a>(
     pane: &'a PaneState,
     tab_state: &'a TabState,
+    widths: ColumnWidths,
     select_mode: SelectMode,
     keybinds: &HashMap<KeyBind, Action>,
     can_paste: bool,
@@ -1446,7 +1503,7 @@ fn list_view<'a>(
             };
             row = row.push(
                 widget::container(cell)
-                    .width(column_width(&tab_state.column_widths, column))
+                    .width(column_width(&widths, column))
                     .clip(true),
             );
         }

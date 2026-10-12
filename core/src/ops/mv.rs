@@ -8,6 +8,53 @@ use super::engine::{copy_planned_files, StopReason};
 use super::plan::plan_tree;
 use super::{CancelHandle, ConflictHandle, ConflictResolution, OpEvent, OpProgress};
 
+fn default_renamed_name(dest: &Path) -> String {
+    let Some(file_name) = dest.file_name().and_then(|name| name.to_str()) else {
+        return "copy".to_string();
+    };
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} (1).{ext}"),
+        None => format!("{stem} (1)"),
+    }
+}
+
+fn append_name_index(name: &str, index: usize) -> String {
+    let path = Path::new(name);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(name);
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} ({index}).{ext}"),
+        None => format!("{stem} ({index})"),
+    }
+}
+
+async fn resolve_renamed_destination(dest: &Path, requested_name: &str) -> PathBuf {
+    let parent = dest.parent().unwrap_or(Path::new("."));
+    let mut candidate_name = requested_name.trim().to_string();
+    if candidate_name.is_empty() {
+        candidate_name = default_renamed_name(dest);
+    }
+
+    let mut candidate = parent.join(&candidate_name);
+    let mut index = 1usize;
+    while candidate == dest || tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+        candidate = parent.join(append_name_index(&candidate_name, index));
+        index += 1;
+    }
+    candidate
+}
+
 /// Moves each of `sources` into `dest_dir`. Tries a same-filesystem rename
 /// first (instant, atomic, whole tree at once); falls back to copying the
 /// tree then removing the original when source and destination are on
@@ -57,19 +104,43 @@ async fn run(
         };
         let dest = dest_dir.join(&name);
 
-        if !replace_all && tokio::fs::try_exists(&dest).await.unwrap_or(false) {
+        let mut resolved_dest = dest.clone();
+        if !replace_all && tokio::fs::try_exists(&resolved_dest).await.unwrap_or(false) {
             if skip_all {
                 continue;
             }
             let _ = tx
                 .send(OpEvent::Conflict {
                     src: source.clone(),
-                    dest: dest.clone(),
+                    dest: resolved_dest.clone(),
                 })
                 .await;
             match conflict.ask().await {
                 ConflictResolution::Replace => {}
                 ConflictResolution::ReplaceAll => replace_all = true,
+                ConflictResolution::Rename(new_name) => {
+                    resolved_dest = resolve_renamed_destination(&resolved_dest, &new_name).await;
+                    if let Err(err) = tokio::fs::rename(&source, &resolved_dest).await {
+                        let _ = tx
+                            .send(OpEvent::Error(format!(
+                                "failed to move {} to {}: {err}",
+                                source.display(),
+                                resolved_dest.display()
+                            )))
+                            .await;
+                        return;
+                    }
+                    let _ = tx
+                        .send(OpEvent::Progress(OpProgress {
+                            current_file: resolved_dest,
+                            files_done: index + 1,
+                            files_total,
+                            bytes_done: 0,
+                            bytes_total: 0,
+                        }))
+                        .await;
+                    continue;
+                }
                 ConflictResolution::Skip => continue,
                 ConflictResolution::SkipAll => {
                     skip_all = true;

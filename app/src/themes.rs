@@ -197,6 +197,22 @@ pub fn build(theme: ColorTheme) -> Option<cosmic::Theme> {
     Some(cosmic::Theme::custom(Arc::new(builder.build())))
 }
 
+/// A flatter, Microsoft-like theme: light-gray surfaces, blue accent, and
+/// square-ish controls, used when the user opts into a Windows visual style.
+pub fn windows_like() -> cosmic::Theme {
+    let mut builder = ThemeBuilder::light()
+        .bg_color(Srgba::new(0.96, 0.96, 0.96, 1.0))
+        .primary_container_bg(Srgba::new(0.92, 0.92, 0.92, 1.0))
+        .text_tint(Srgb::new(0.12, 0.12, 0.12))
+        .neutral_tint(Srgb::new(0.52, 0.52, 0.52))
+        .accent(Srgb::new(0.0, 0.47, 0.84))
+        .success(Srgb::new(0.16, 0.64, 0.32))
+        .warning(Srgb::new(0.95, 0.65, 0.18))
+        .destructive(Srgb::new(0.79, 0.22, 0.2));
+    builder.secondary_container_bg = Some(Srgba::new(0.86, 0.86, 0.86, 1.0));
+    cosmic::Theme::custom(Arc::new(builder.build()))
+}
+
 /// The corner sizes for a roundness step. Square, Medium and Large are
 /// COSMIC's own Square, Slightly round and Round styles.
 fn corner_radii(corners: Corners) -> CornerRadii {
@@ -284,5 +300,16 @@ mod tests {
         for theme in [ColorTheme::System, ColorTheme::Light, ColorTheme::Dark] {
             assert!(build(theme).is_none());
         }
+    }
+
+    #[test]
+    fn windows_like_theme_is_light_and_blue_accent() {
+        let built = windows_like();
+        let cosmic = built.cosmic();
+        let accent = cosmic.accent_color();
+        assert!(!cosmic.is_dark);
+        assert!(accent.red < 0.1);
+        assert!(accent.green > 0.3);
+        assert!(accent.blue > 0.7);
     }
 }

@@ -23,7 +23,10 @@ pub struct Settings {
     pub separate_extension: bool,
     /// 2fip's colors: the desktop's theme, or one of 2fip's own.
     pub color_theme: ColorTheme,
-    /// How rounded the window, buttons and panels are.
+    /// Flattens the theme into a Windows-like look: blue accent, light gray
+    /// surfaces and square-ish controls.
+    pub windows_style: bool,
+    /// How rounded the window, buttons, menus and panels are.
     pub corners: Corners,
 }
 
@@ -154,6 +157,7 @@ impl Default for Settings {
             name_font_size: FontSize::default(),
             separate_extension: true,
             color_theme: ColorTheme::default(),
+            windows_style: false,
             corners: Corners::default(),
         }
     }
@@ -263,6 +267,7 @@ mod tests {
             name_font_size: FontSize::Smaller,
             separate_extension: false,
             color_theme: ColorTheme::Dracula,
+            windows_style: false,
             corners: Corners::Small,
         };
 

@@ -18,6 +18,56 @@ pub(super) enum StopReason {
 /// how to proceed. Does *not* send `OpEvent::Done` — the caller does that
 /// once it's done everything it needs to (e.g. also removing sources, for a
 /// cross-filesystem move).
+fn default_renamed_name(dest: &std::path::Path) -> String {
+    let Some(file_name) = dest.file_name().and_then(|name| name.to_str()) else {
+        return "copy".to_string();
+    };
+    let path = std::path::Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} (1).{ext}"),
+        None => format!("{stem} (1)"),
+    }
+}
+
+fn append_name_index(name: &str, index: usize) -> String {
+    let path = std::path::Path::new(name);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(name);
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_name);
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => format!("{stem} ({index}).{ext}"),
+        None => format!("{stem} ({index})"),
+    }
+}
+
+async fn resolve_renamed_destination(
+    dest: &std::path::Path,
+    requested_name: &str,
+) -> std::path::PathBuf {
+    let parent = dest.parent().unwrap_or(std::path::Path::new("."));
+    let mut candidate_name = requested_name.trim().to_string();
+    if candidate_name.is_empty() {
+        candidate_name = default_renamed_name(dest);
+    }
+
+    let mut candidate = parent.join(&candidate_name);
+    let mut index = 1usize;
+    while candidate == dest || tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+        candidate = parent.join(append_name_index(&candidate_name, index));
+        index += 1;
+    }
+    candidate
+}
+
 pub(super) async fn copy_planned_files(
     planned: &[PlannedFile],
     files_total: usize,
@@ -44,6 +94,7 @@ pub(super) async fn copy_planned_files(
             )));
         }
 
+        let mut destination = file.dest.clone();
         if !replace_all && tokio::fs::try_exists(&file.dest).await.unwrap_or(false) {
             if skip_all {
                 files_done += 1;
@@ -60,6 +111,9 @@ pub(super) async fn copy_planned_files(
             match conflict.ask().await {
                 ConflictResolution::Replace => {}
                 ConflictResolution::ReplaceAll => replace_all = true,
+                ConflictResolution::Rename(name) => {
+                    destination = resolve_renamed_destination(&file.dest, &name).await;
+                }
                 ConflictResolution::Skip => {
                     files_done += 1;
                     continue;
@@ -72,18 +126,18 @@ pub(super) async fn copy_planned_files(
             }
         }
 
-        if let Some(parent) = file.dest.parent() {
+        if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|err| {
                 StopReason::Error(format!("failed to create {}: {err}", parent.display()))
             })?;
         }
-        tokio::fs::copy(&file.src, &file.dest)
+        tokio::fs::copy(&file.src, &destination)
             .await
             .map_err(|err| {
                 StopReason::Error(format!(
                     "failed to copy {} to {}: {err}",
                     file.src.display(),
-                    file.dest.display()
+                    destination.display()
                 ))
             })?;
 
@@ -91,7 +145,7 @@ pub(super) async fn copy_planned_files(
         files_done += 1;
         let _ = tx
             .send(OpEvent::Progress(OpProgress {
-                current_file: file.dest.clone(),
+                current_file: destination,
                 files_done,
                 files_total,
                 bytes_done,
