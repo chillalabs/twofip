@@ -5,3 +5,4 @@
 /.flatpak-builder
 /flatpak/build
 /flatpak/repo
+/.claude
