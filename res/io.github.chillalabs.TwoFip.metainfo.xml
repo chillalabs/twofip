@@ -65,6 +65,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.4" date="2026-10-13">
+      <description>
+        <p>Fix the automatic refresh:</p>
+        <ul>
+          <li>Folders refresh only when files are added, removed, renamed or changed, no longer in a loop that could steal the keyboard focus</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-10-13">
       <description>
         <p>Panels refresh themselves:</p>

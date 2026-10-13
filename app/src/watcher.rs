@@ -73,6 +73,9 @@ async fn run(state: State) -> Option<(WatcherEvent, State)> {
             let watcher =
                 match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                     if let Ok(event) = res {
+                        if !is_relevant(event.kind) {
+                            return;
+                        }
                         for path in event.paths {
                             let _ = notify_tx.unbounded_send(Msg::Changed(path));
                         }
@@ -144,4 +147,19 @@ fn apply_watch(
         let _ = watcher.watch(path, notify::RecursiveMode::NonRecursive);
     }
     want
+}
+
+/// Whether a change event means the folder's *listing* changed. We ignore
+/// `Access` (open/close/read) — our own `list_dir` opens the folder, which
+/// would otherwise loop — and metadata-only modifications.
+#[cfg(unix)]
+fn is_relevant(kind: notify::EventKind) -> bool {
+    use notify::event::ModifyKind;
+    matches!(
+        kind,
+        notify::EventKind::Create(_)
+            | notify::EventKind::Remove(_)
+            | notify::EventKind::Modify(ModifyKind::Data(_))
+            | notify::EventKind::Modify(ModifyKind::Name(_))
+    )
 }
