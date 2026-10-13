@@ -11,6 +11,32 @@ pub struct Favorite {
     pub path: PathBuf,
 }
 
+/// Why a favorite can't be added: one already saved clashes with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuplicateReason {
+    /// That folder is already saved.
+    Path,
+    /// Another favorite already uses that name.
+    Name,
+}
+
+/// The existing favorite `name`/`path` would duplicate, and why. `name` is
+/// expected to be trimmed already. Path wins over name: if both clash, the
+/// entry found is the same one either way.
+pub fn find_duplicate(
+    favorites: &[Favorite],
+    name: &str,
+    path: &Path,
+) -> Option<(usize, DuplicateReason)> {
+    if let Some(index) = favorites.iter().position(|favorite| favorite.path == path) {
+        return Some((index, DuplicateReason::Path));
+    }
+    favorites
+        .iter()
+        .position(|favorite| favorite.name == name)
+        .map(|index| (index, DuplicateReason::Name))
+}
+
 /// Loads the persisted favorites list. Returns an empty list if none has
 /// been saved yet or the file can't be parsed - favorites are a convenience,
 /// not critical state, so a corrupt file shouldn't stop the app from starting.
@@ -87,5 +113,66 @@ mod tests {
         fs::write(&path, b"not json").unwrap();
 
         assert!(load_from(&path).is_empty());
+    }
+
+    fn saved() -> Vec<Favorite> {
+        vec![
+            Favorite {
+                name: "Projects".to_string(),
+                path: PathBuf::from("/home/user/projects"),
+            },
+            Favorite {
+                name: "Downloads".to_string(),
+                path: PathBuf::from("/home/user/downloads"),
+            },
+        ]
+    }
+
+    #[test]
+    fn the_same_folder_under_another_name_is_a_duplicate() {
+        assert_eq!(
+            find_duplicate(&saved(), "Work", Path::new("/home/user/projects")),
+            Some((0, DuplicateReason::Path))
+        );
+    }
+
+    #[test]
+    fn another_folder_under_a_used_name_is_a_duplicate() {
+        assert_eq!(
+            find_duplicate(&saved(), "Downloads", Path::new("/mnt/usb")),
+            Some((1, DuplicateReason::Name))
+        );
+    }
+
+    #[test]
+    fn a_trailing_slash_does_not_hide_a_duplicate() {
+        assert_eq!(
+            find_duplicate(&saved(), "Work", Path::new("/home/user/projects/")),
+            Some((0, DuplicateReason::Path))
+        );
+    }
+
+    #[test]
+    fn a_clash_on_both_name_and_folder_reports_the_folder() {
+        assert_eq!(
+            find_duplicate(&saved(), "Projects", Path::new("/home/user/projects")),
+            Some((0, DuplicateReason::Path))
+        );
+    }
+
+    #[test]
+    fn a_new_name_on_a_new_folder_is_not_a_duplicate() {
+        assert_eq!(
+            find_duplicate(&saved(), "Music", Path::new("/home/user/music")),
+            None
+        );
+    }
+
+    #[test]
+    fn an_empty_list_has_no_duplicates() {
+        assert_eq!(
+            find_duplicate(&[], "Projects", Path::new("/home/user/projects")),
+            None
+        );
     }
 }

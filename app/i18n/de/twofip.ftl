@@ -120,6 +120,9 @@ favorites-move-up = Nach oben (Ctrl+↑)
 favorites-move-down = Nach unten (Ctrl+↓)
 favorites-add-current = Aktuellen Ordner hinzufügen
 favorites-add = Hinzufügen
+favorites-duplicate-title = Favorit bereits gespeichert
+favorites-duplicate-path = Dieser Ordner ist bereits als „{ $name }“ gespeichert.
+favorites-duplicate-name = Es gibt bereits einen Favoriten namens „{ $name }“, der auf { $path } zeigt.
 
 ## Dialog „Datei existiert bereits“
 conflict-title = Datei existiert bereits

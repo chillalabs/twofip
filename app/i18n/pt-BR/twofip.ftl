@@ -122,6 +122,9 @@ favorites-move-up = Mover para cima (Ctrl+↑)
 favorites-move-down = Mover para baixo (Ctrl+↓)
 favorites-add-current = Adicionar a pasta atual
 favorites-add = Adicionar
+favorites-duplicate-title = Favorito já salvo
+favorites-duplicate-path = Esta pasta já está salva como "{ $name }".
+favorites-duplicate-name = Já existe um favorito chamado "{ $name }", apontando para { $path }.
 
 ## Diálogo "O arquivo já existe"
 conflict-title = O arquivo já existe

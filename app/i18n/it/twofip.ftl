@@ -120,6 +120,9 @@ favorites-move-up = Sposta su (Ctrl+↑)
 favorites-move-down = Sposta giù (Ctrl+↓)
 favorites-add-current = Aggiungi la cartella attuale
 favorites-add = Aggiungi
+favorites-duplicate-title = Preferito già salvato
+favorites-duplicate-path = Questa cartella è già salvata come «{ $name }».
+favorites-duplicate-name = Esiste già un preferito chiamato «{ $name }», che punta a { $path }.
 
 ## Finestra «Il file esiste già»
 conflict-title = Il file esiste già

@@ -14,7 +14,7 @@ use cosmic::{Application, Element};
 use tokio_stream::{Stream, StreamExt};
 
 use fs_ops::details::Details;
-use fs_ops::favorites::Favorite;
+use fs_ops::favorites::{DuplicateReason, Favorite};
 use fs_ops::ops::{CancelHandle, ConflictHandle, ConflictResolution, OpEvent};
 use fs_ops::search::SearchEvent;
 use fs_ops::session::Session;
@@ -84,6 +84,8 @@ pub enum Message {
     ResolveConflict(ConflictResolution),
     FavoriteNameChanged(String),
     AddFavorite,
+    /// Dismisses the "favorite already saved" alert.
+    CloseFavoriteAlert,
     RemoveFavorite(usize),
     /// Moves a favorite one place up (`true`) or down in the list.
     MoveFavorite(usize, bool),
@@ -430,6 +432,9 @@ pub struct App {
     favorite_cursor: Option<usize>,
     /// Where the Favorites dialog's keyboard focus is.
     favorite_focus: FavoriteFocus,
+    /// Set when Add was refused because the favorite is already saved: the
+    /// existing entry (so the list can highlight it) and why it clashes.
+    favorite_alert: Option<(usize, DuplicateReason)>,
     /// The Find Files dialog, while open.
     find: Option<FindState>,
     /// The "Connect to server" dialog, while open.
@@ -870,11 +875,26 @@ impl App {
                     "" => tab_label(&path),
                     name => name.to_string(),
                 };
+                if let Some((index, reason)) =
+                    fs_ops::favorites::find_duplicate(&self.favorites, &name, &path)
+                {
+                    // Don't save the same thing twice: highlight the entry that's
+                    // already there and say why it clashes. The name box keeps its
+                    // text, so a name clash can be edited and retried.
+                    self.favorite_cursor = Some(index);
+                    self.favorite_focus = FavoriteFocus::List;
+                    self.favorite_alert = Some((index, reason));
+                    return widget::button::focus(self.dialog_confirm.clone());
+                }
                 self.favorites.push(Favorite { name, path });
                 self.persist_favorites();
                 self.favorite_name.clear();
                 self.favorite_cursor = Some(self.favorites.len() - 1);
                 Task::none()
+            }
+            Message::CloseFavoriteAlert => {
+                self.favorite_alert = None;
+                self.focus_favorite_name()
             }
             Message::RemoveFavorite(index) => {
                 if index < self.favorites.len() {
@@ -2601,6 +2621,17 @@ impl App {
         }
     }
 
+    /// Puts the keyboard back in the Favorites panel's name field, with its
+    /// text selected so it can be replaced. Used when the "favorite already
+    /// saved" alert closes, since fixing the name is the likely next step.
+    fn focus_favorite_name(&mut self) -> Task<Message> {
+        self.favorite_focus = FavoriteFocus::NameField;
+        Task::batch([
+            widget::text_input::focus(self.favorite_name_input.clone()),
+            widget::text_input::select_all(self.favorite_name_input.clone()),
+        ])
+    }
+
     /// Moves keyboard focus to the Delete dialog's Delete (`true`) or Cancel button.
     fn focus_delete_button(&mut self, confirm: bool) -> Task<Message> {
         self.delete_focus_on_confirm = confirm;
@@ -2640,6 +2671,7 @@ impl App {
             || self.open_with.is_some()
             || self.details.is_some()
             || self.connect.is_some()
+            || self.favorite_alert.is_some()
     }
 
     /// True while any modal dialog is showing.
@@ -2766,6 +2798,7 @@ impl Application for App {
             favorite_name: String::new(),
             favorite_cursor: None,
             favorite_focus: FavoriteFocus::List,
+            favorite_alert: None,
             find: None,
             connect: None,
             connect_protocols: crate::connect::protocol_names(),
@@ -2878,6 +2911,9 @@ impl Application for App {
     }
 
     fn on_escape(&mut self) -> Task<Message> {
+        if self.favorite_alert.take().is_some() {
+            return self.focus_favorite_name();
+        }
         if self.rename.take().is_some() {
             return Task::none();
         }
@@ -2933,6 +2969,31 @@ impl Application for App {
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
+        if let Some((index, reason)) = self.favorite_alert {
+            let favorite = self.favorites.get(index)?;
+            let body = match reason {
+                DuplicateReason::Path => {
+                    fl!("favorites-duplicate-path", name = favorite.name.as_str())
+                }
+                DuplicateReason::Name => fl!(
+                    "favorites-duplicate-name",
+                    name = favorite.name.as_str(),
+                    path = favorite.path.display().to_string()
+                ),
+            };
+            return Some(
+                widget::dialog()
+                    .title(fl!("favorites-duplicate-title"))
+                    .body(body)
+                    .primary_action(
+                        widget::button::standard(fl!("close"))
+                            .id(self.dialog_confirm.clone())
+                            .on_press(Message::CloseFavoriteAlert),
+                    )
+                    .into(),
+            );
+        }
+
         if let Some(rename) = &self.conflict_rename {
             return Some(
                 widget::dialog()
