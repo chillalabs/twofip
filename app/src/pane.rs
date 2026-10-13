@@ -943,6 +943,11 @@ impl PaneState {
             .unwrap_or_else(|| PathBuf::from("/"))
     }
 
+    /// Whether the path-bar editor is open (a reload must not interrupt it).
+    pub fn path_edit_active(&self) -> bool {
+        self.path_edit.is_some()
+    }
+
     /// Paths of the items selected in the active tab's file listing.
     pub fn selected_paths(&self) -> Vec<PathBuf> {
         let Some(tab_state) = self.tabs.active_data::<TabState>() else {

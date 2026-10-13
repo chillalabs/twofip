@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::app::{Core, Task};
@@ -35,6 +36,7 @@ use crate::operation::{OpKind, OperationState};
 use crate::pane::{home_dir, PaneMessage, PaneState, SelectMode};
 use crate::tab::{matches_filter, tab_label};
 use crate::themes;
+use crate::watcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaneId {
@@ -178,6 +180,11 @@ pub enum Message {
     FindHighlight(usize),
     FindGoTo(usize),
     FindClose,
+    /// The inotify watcher is ready (carries its command sender) or a watched
+    /// folder changed.
+    WatcherEvent(watcher::WatcherEvent),
+    /// The main window regained focus.
+    WindowFocused(cosmic::iced::window::Id),
 }
 
 /// Index of "Skip" in `App::conflict_buttons`: the safe default focus.
@@ -399,6 +406,11 @@ pub struct App {
     active_pane: PaneId,
     keybinds: HashMap<KeyBind, Action>,
     operation: Option<OperationState>,
+    /// The moment the last operation finished, to ignore inotify events that
+    /// arrive just after it (their reload already happened on `Done`).
+    last_op_done: Option<Instant>,
+    /// The inotify watcher's command channel, once it reports ready.
+    watcher: Option<watcher::CommandSender>,
     confirm_delete: Option<Vec<PathBuf>>,
     /// Whether the Delete dialog deletes for good (Shift+Delete) instead of
     /// moving to the trash.
@@ -591,8 +603,29 @@ impl App {
             }
             Message::ExitNow => self.exit_now(),
             Message::ActivatePane(id) => {
+                let changed = id != self.active_pane;
                 self.set_active_pane(id);
-                Task::none()
+                // A freshly-focused pane shows what is on disk right now.
+                if changed && self.can_auto_refresh() {
+                    self.reload_active_pane()
+                } else {
+                    Task::none()
+                }
+            }
+            Message::WatcherEvent(event) => match event {
+                watcher::WatcherEvent::Ready(sender) => {
+                    self.watcher = Some(sender);
+                    self.sync_watcher();
+                    Task::none()
+                }
+                watcher::WatcherEvent::Changed(path) => self.on_external_change(path),
+            },
+            Message::WindowFocused(id) => {
+                if self.core.main_window_id() == Some(id) && self.can_auto_refresh() {
+                    self.reload_active_pane()
+                } else {
+                    Task::none()
+                }
             }
             Message::EscapeCaptured => {
                 // Text boxes swallow Escape; still let one press close the
@@ -728,12 +761,14 @@ impl App {
                 }
                 OpEvent::Done => {
                     self.operation = None;
+                    self.last_op_done = Some(Instant::now());
                     let reload = self.reload_both_panes();
                     let folder_size = self.refresh_folder_size();
                     Task::batch([reload, folder_size])
                 }
                 OpEvent::Cancelled => {
                     self.operation = None;
+                    self.last_op_done = Some(Instant::now());
                     let reload = self.reload_both_panes();
                     let folder_size = self.refresh_folder_size();
                     Task::batch([reload, folder_size])
@@ -1423,11 +1458,78 @@ impl App {
         Task::batch(vec![self.left.reload(), self.right.reload()])
     }
 
+    /// Reloads just the active pane's current folder.
+    fn reload_active_pane(&self) -> Task<Message> {
+        match self.active_pane {
+            PaneId::Left => self.left.reload(),
+            PaneId::Right => self.right.reload(),
+        }
+    }
+
+    /// Whether an automatic refresh is safe right now: not mid-operation and
+    /// not mid-edit (rename / new folder / path editor).
+    fn can_auto_refresh(&self) -> bool {
+        self.operation.is_none()
+            && self.rename.is_none()
+            && self.new_folder.is_none()
+            && !self.left.path_edit_active()
+            && !self.right.path_edit_active()
+    }
+
+    /// Points the inotify watcher at the panes' current local folders.
+    fn sync_watcher(&self) {
+        let Some(sender) = &self.watcher else {
+            return;
+        };
+        let mut paths = HashSet::new();
+        for dir in [self.left.current_dir(), self.right.current_dir()] {
+            if !fs_ops::vfs::is_remote(&dir) {
+                paths.insert(dir);
+            }
+        }
+        sender.watch(paths);
+    }
+
+    /// A watched folder changed on disk: reload the pane(s) showing it.
+    fn on_external_change(&mut self, path: PathBuf) -> Task<Message> {
+        if !self.can_auto_refresh() {
+            return Task::none();
+        }
+        // Our own operations already reload on `Done`; ignore the inotify
+        // events that land just after.
+        if self
+            .last_op_done
+            .is_some_and(|done| done.elapsed() < Duration::from_millis(500))
+        {
+            return Task::none();
+        }
+        let left = self.left.current_dir();
+        let right = self.right.current_dir();
+        let mut tasks = Vec::new();
+        if !fs_ops::vfs::is_remote(&left) && path.starts_with(&left) {
+            tasks.push(self.left.reload());
+        }
+        if !fs_ops::vfs::is_remote(&right) && path.starts_with(&right) {
+            tasks.push(self.right.reload());
+        }
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
+    }
+
     fn handle_action(&mut self, action: Action) -> Task<Message> {
         match action {
             Action::SwitchPane => {
                 self.set_active_pane(self.active_pane.other());
-                Task::none()
+                // Switching panes is a moment to show the freshly-activated
+                // pane's current state, like the other explicit refreshes.
+                if self.can_auto_refresh() {
+                    self.reload_active_pane()
+                } else {
+                    Task::none()
+                }
             }
             Action::NextTab => self
                 .pane_mut(self.active_pane)
@@ -2790,6 +2892,8 @@ impl Application for App {
             },
             keybinds: default_keybinds(),
             operation: None,
+            last_op_done: None,
+            watcher: None,
             confirm_delete: None,
             delete_permanently: false,
             rename: None,
@@ -2847,6 +2951,8 @@ impl Application for App {
         let task = self.handle_message(message);
         self.save_session_if_changed();
         self.close_unused_connections();
+        // Keep the inotify watch set tracking the panes' current folders.
+        self.sync_watcher();
         task
     }
 
@@ -2963,11 +3069,16 @@ impl Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        if self.left.is_resizing_columns() || self.right.is_resizing_columns() {
+        let keys = if self.left.is_resizing_columns() || self.right.is_resizing_columns() {
             Subscription::batch([key_subscription(), column_resize_subscription()])
         } else {
             key_subscription()
-        }
+        };
+        Subscription::batch([
+            keys,
+            watcher::subscription().map(Message::WatcherEvent),
+            focus_subscription(),
+        ])
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
@@ -3408,6 +3519,14 @@ fn key_subscription() -> Subscription<Message> {
         Event::Window(cosmic::iced::window::Event::FileDropped(paths)) => {
             Some(Message::ExternalDrop(paths))
         }
+        _ => None,
+    })
+}
+
+/// Fires when the main window regains focus, so the active pane can refresh.
+fn focus_subscription() -> Subscription<Message> {
+    listen_raw(|event, _status, window| match event {
+        Event::Window(cosmic::iced::window::Event::Focused) => Some(Message::WindowFocused(window)),
         _ => None,
     })
 }

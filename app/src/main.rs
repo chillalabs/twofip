@@ -18,6 +18,7 @@ mod pane;
 mod shell_menu;
 mod tab;
 mod themes;
+mod watcher;
 #[cfg(windows)]
 mod windows;
 
