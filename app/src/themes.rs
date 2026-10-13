@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use cosmic::cosmic_theme::palette::{Srgb, Srgba};
 use cosmic::cosmic_theme::{CornerRadii, Roundness, ThemeBuilder};
+use cosmic::iced::{Background, Border, Color};
+use cosmic::widget;
 use fs_ops::settings::{ColorTheme, Corners};
 
 /// The colors a theme is built from, as `0xrrggbb`.
@@ -244,6 +246,58 @@ pub fn with_corners(theme: &cosmic::Theme, corners: Corners, system: bool) -> co
     }
 }
 
+/// libcosmic's tooltip look, plus a readable text color. Its own style leaves
+/// the text color to the surroundings, and its background isn't tied to the
+/// theme's text color: with COSMIC's light theme the background is near-black
+/// while the text is dark. So the text color is picked from the background
+/// itself.
+pub fn tooltip_style(theme: &cosmic::Theme) -> widget::container::Style {
+    let cosmic = theme.cosmic();
+    let background = cosmic.palette.neutral_2;
+    let text = contrasting_text(background.red, background.green, background.blue);
+    widget::container::Style {
+        icon_color: Some(text),
+        text_color: Some(text),
+        background: Some(Background::Color(background.into())),
+        border: Border {
+            radius: cosmic.corner_radii.radius_l.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// Near-white text on a dark background, near-black on a light one
+/// (by the background's relative luminance; channels are sRGB, 0–1).
+fn contrasting_text(red: f32, green: f32, blue: f32) -> Color {
+    let linear = |c: f32| {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+    // 0.18: where white and black text have equal contrast (WCAG).
+    if luminance < 0.18 {
+        Color::from_rgb(0.95, 0.95, 0.95)
+    } else {
+        Color::from_rgb(0.08, 0.08, 0.08)
+    }
+}
+
+/// A [`cosmic::widget::tooltip`] whose text always contrasts with its
+/// background (see [`tooltip_style`]). Use this everywhere instead of
+/// libcosmic's default tooltip, which is unreadable in the light theme.
+pub fn tooltip<'a, Message>(
+    content: impl Into<cosmic::Element<'a, Message>>,
+    tooltip: impl Into<cosmic::Element<'a, Message>>,
+    position: cosmic::widget::tooltip::Position,
+) -> cosmic::widget::Tooltip<'a, Message> {
+    cosmic::widget::tooltip(content, tooltip, position)
+        .class(cosmic::theme::Container::custom(tooltip_style))
+}
+
 /// `0xrrggbb` → color.
 fn hex(rgb: u32) -> Srgb {
     Srgb::new(
@@ -311,5 +365,15 @@ mod tests {
         assert!(accent.red < 0.1);
         assert!(accent.green > 0.3);
         assert!(accent.blue > 0.7);
+    }
+
+    #[test]
+    fn tooltip_text_contrasts_with_its_background() {
+        // Near-black (what the light theme shows) and the dark palette's #161616.
+        assert!(contrasting_text(0.1, 0.1, 0.1).r > 0.9);
+        assert!(contrasting_text(0.086, 0.086, 0.086).r > 0.9);
+        // The light palette's #BEBEBE and white.
+        assert!(contrasting_text(0.745, 0.745, 0.745).r < 0.1);
+        assert!(contrasting_text(1.0, 1.0, 1.0).r < 0.1);
     }
 }

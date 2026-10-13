@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cosmic::app::context_drawer::{self, ContextDrawer};
@@ -200,7 +200,7 @@ fn corners_name(corners: Corners) -> String {
     }
 }
 
-fn suggested_conflict_rename_name(path: &PathBuf) -> String {
+fn suggested_conflict_rename_name(path: &Path) -> String {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return "copy".to_string();
     };
@@ -1037,7 +1037,7 @@ impl App {
                 self.focus_settings_row(SettingsRow::WindowsStyle);
                 self.settings.windows_style = windows_style;
                 self.persist_settings();
-                return self.apply_color_theme();
+                self.apply_color_theme()
             }
             Message::LanguageSelected(index) => {
                 self.focus_settings_row(SettingsRow::Language);
@@ -2392,16 +2392,18 @@ impl App {
             let buttons = widget::Row::new()
                 .spacing(4)
                 .align_y(Alignment::Center)
-                .push(
+                .push(themes::tooltip(
                     widget::button::icon(widget::icon::from_name("go-up-symbolic"))
-                        .tooltip(fl!("favorites-move-up"))
                         .on_press_maybe((!is_first).then_some(Message::MoveFavorite(index, true))),
-                )
-                .push(
+                    widget::text(fl!("favorites-move-up")),
+                    widget::tooltip::Position::Top,
+                ))
+                .push(themes::tooltip(
                     widget::button::icon(widget::icon::from_name("go-down-symbolic"))
-                        .tooltip(fl!("favorites-move-down"))
                         .on_press_maybe((!is_last).then_some(Message::MoveFavorite(index, false))),
-                )
+                    widget::text(fl!("favorites-move-down")),
+                    widget::tooltip::Position::Top,
+                ))
                 .push(widget::button::standard(fl!("open")).on_press(Message::GoToFavorite(index)))
                 .push(
                     widget::button::icon(widget::icon::from_name("user-trash-symbolic"))

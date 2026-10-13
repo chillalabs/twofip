@@ -12,6 +12,7 @@ use fs_ops::folder_size::Entry;
 use crate::app::{Message, PaneId};
 use crate::file_item::{format_size, ListingOptions};
 use crate::fl;
+use crate::themes;
 
 pub struct Panel {
     pub target: PaneId,
@@ -144,7 +145,7 @@ impl Panel {
                     .push(widget::text::caption(path).width(Length::Fill)),
             )
             .push(widget::Space::new().width(Length::Fill))
-            .push(widget::tooltip(
+            .push(themes::tooltip(
                 widget::button::icon(icon::from_name("window-close-symbolic"))
                     .on_press(Message::FolderSizeClose),
                 widget::text(fl!("close")),
@@ -248,7 +249,7 @@ impl Panel {
         if let Some((path, name, size)) = &self.hovered {
             let context_menu = widget::context_menu(canvas, entry_context_menu(self.target))
                 .on_open(Message::FolderSizeContextOpen(self.target, path.clone()));
-            widget::tooltip(
+            themes::tooltip(
                 context_menu,
                 widget::text::body(format!("{}  {size}", short_name(name))),
                 widget::tooltip::Position::FollowCursor,

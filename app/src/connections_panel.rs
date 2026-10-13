@@ -12,6 +12,7 @@ use fs_ops::connections::SavedConnection;
 
 use crate::app::Message;
 use crate::fl;
+use crate::themes;
 
 /// A connection's state, as last seen by the panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,10 +71,12 @@ fn status_line<'a>(check: &Check, connected: bool) -> Element<'a, Message> {
 }
 
 fn tool<'a>(icon: &'static str, tooltip: String, message: Option<Message>) -> Element<'a, Message> {
-    widget::button::icon(widget::icon::from_name(icon))
-        .tooltip(tooltip)
-        .on_press_maybe(message)
-        .into()
+    themes::tooltip(
+        widget::button::icon(widget::icon::from_name(icon)).on_press_maybe(message),
+        widget::text(tooltip),
+        widget::tooltip::Position::Top,
+    )
+    .into()
 }
 
 /// One connection: name, address, status, buttons.

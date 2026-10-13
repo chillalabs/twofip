@@ -12,6 +12,7 @@ use fs_ops::settings::ViewMode;
 use crate::app::Message;
 use crate::fl;
 use crate::keybinds::Action;
+use crate::themes;
 
 /// An [`Action`] fired from the top menu bar. `Action`'s own [`MenuAction`]
 /// impl produces a pane message (for the file context menu); this one
@@ -164,15 +165,14 @@ pub fn menu_bar<'a>(
     // The tooltip goes below: the buttons sit at the top of the window, and
     // libcosmic's default (above) would cover the title bar.
     let tool = |icon_name: &'static str, tooltip: String, action: Action| {
-        widget::tooltip(
+        themes::tooltip(
             widget::button::icon(icon::from_name(icon_name)).on_press(Message::Action(action)),
             widget::text(tooltip),
             widget::tooltip::Position::Bottom,
         )
-        .class(cosmic::theme::Container::custom(tooltip_style))
     };
 
-    let folder_size = widget::tooltip(
+    let folder_size = themes::tooltip(
         widget::button::custom(
             icon::from_svg_bytes(include_bytes!("../resources/icons/folder-size.svg"))
                 .symbolic(true)
@@ -182,8 +182,7 @@ pub fn menu_bar<'a>(
         .on_press_maybe(can_folder_size.then_some(Message::Action(Action::FolderSize))),
         widget::text(fl!("folder-size")),
         widget::tooltip::Position::Bottom,
-    )
-    .class(cosmic::theme::Container::custom(tooltip_style));
+    );
 
     vec![
         bar.into(),
@@ -206,59 +205,4 @@ pub fn menu_bar<'a>(
         .into(),
         folder_size.into(),
     ]
-}
-
-/// libcosmic's tooltip look, plus a readable text color. Its own style leaves
-/// the text color to the surroundings (the title bar's, here), and its
-/// background isn't tied to the theme's text color: with COSMIC's light theme
-/// the background is near-black while the text is dark. So the text color is
-/// picked from the background itself.
-fn tooltip_style(theme: &cosmic::Theme) -> widget::container::Style {
-    let cosmic = theme.cosmic();
-    let background = cosmic.palette.neutral_2;
-    let text = contrasting_text(background.red, background.green, background.blue);
-    widget::container::Style {
-        icon_color: Some(text),
-        text_color: Some(text),
-        background: Some(cosmic::iced::Background::Color(background.into())),
-        border: cosmic::iced::Border {
-            radius: cosmic.corner_radii.radius_l.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
-/// Near-white text on a dark background, near-black on a light one
-/// (by the background's relative luminance; channels are sRGB, 0–1).
-fn contrasting_text(red: f32, green: f32, blue: f32) -> cosmic::iced::Color {
-    let linear = |c: f32| {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
-    // 0.18: where white and black text have equal contrast (WCAG).
-    if luminance < 0.18 {
-        cosmic::iced::Color::from_rgb(0.95, 0.95, 0.95)
-    } else {
-        cosmic::iced::Color::from_rgb(0.08, 0.08, 0.08)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tooltip_text_contrasts_with_its_background() {
-        // Near-black (what the light theme shows) and the dark palette's #161616.
-        assert!(contrasting_text(0.1, 0.1, 0.1).r > 0.9);
-        assert!(contrasting_text(0.086, 0.086, 0.086).r > 0.9);
-        // The light palette's #BEBEBE and white.
-        assert!(contrasting_text(0.745, 0.745, 0.745).r < 0.1);
-        assert!(contrasting_text(1.0, 1.0, 1.0).r < 0.1);
-    }
 }

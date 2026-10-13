@@ -65,6 +65,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.2" date="2026-10-13">
+      <description>
+        <p>Readable tooltips in every theme:</p>
+        <ul>
+          <li>Tooltip text now always contrasts with its background, fixing the black-on-black tooltips in the light theme</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-13">
       <description>
         <p>Folders, favorites and the panel layout:</p>

@@ -15,6 +15,7 @@ use crate::file_item::{format_size, Column, FileItem, ListingOptions};
 use crate::fl;
 use crate::keybinds::Action;
 use crate::tab::{tab_label, DirSize, PendingSelect, TabState};
+use crate::themes;
 use cosmic::iced::clipboard::dnd::DndAction;
 use fs_ops::settings::{ColumnWidths, FontSize, ViewMode};
 
@@ -1016,9 +1017,11 @@ impl PaneState {
         let tab_bar = self.tab_strip();
 
         let nav_button = |icon: widget::icon::Handle, tooltip: String, message| {
-            widget::button::icon(icon)
-                .tooltip(tooltip)
-                .on_press(message)
+            themes::tooltip(
+                widget::button::icon(icon).on_press(message),
+                widget::text(tooltip),
+                widget::tooltip::Position::Top,
+            )
         };
         let header = widget::Row::new()
             .spacing(4)
@@ -1036,10 +1039,13 @@ impl PaneState {
             ))
             .push(
                 // Arrow + "[..]", like Total Commander's parent-folder entry.
-                widget::button::text("[..]")
-                    .leading_icon(parent_folder_icon())
-                    .tooltip(fl!("tooltip-up"))
-                    .on_press(PaneMessage::GoUp),
+                themes::tooltip(
+                    widget::button::text("[..]")
+                        .leading_icon(parent_folder_icon())
+                        .on_press(PaneMessage::GoUp),
+                    widget::text(fl!("tooltip-up")),
+                    widget::tooltip::Position::Top,
+                ),
             )
             .push(nav_button(
                 widget::icon::from_name("list-add-symbolic").handle(),
@@ -1168,9 +1174,12 @@ impl PaneState {
                 .on_input(PaneMessage::PathEditChanged)
                 .on_submit(|_| PaneMessage::SubmitPathEdit)
                 .width(Length::Fill);
-            let cancel = widget::button::icon(widget::icon::from_name("window-close-symbolic"))
-                .tooltip(fl!("tooltip-cancel-esc"))
-                .on_press(PaneMessage::CancelPathEdit);
+            let cancel = themes::tooltip(
+                widget::button::icon(widget::icon::from_name("window-close-symbolic"))
+                    .on_press(PaneMessage::CancelPathEdit),
+                widget::text(fl!("tooltip-cancel-esc")),
+                widget::tooltip::Position::Top,
+            );
             return widget::Column::new()
                 .width(Length::Fill)
                 .push(
@@ -1204,25 +1213,30 @@ impl PaneState {
             if index > 0 {
                 crumbs = crumbs.push(widget::icon::from_name("pan-end-symbolic").size(12));
             }
+            let tooltip = folder.display().to_string();
             let mut button = widget::button::text(label)
                 .class(path_button_class(is_active))
-                .tooltip(folder.display().to_string())
                 .on_press(PaneMessage::Navigate(folder));
             if remote && index == 0 {
                 button = button.leading_icon(widget::icon::from_name("network-server-symbolic"));
             }
-            crumbs = crumbs.push(button);
+            crumbs = crumbs.push(themes::tooltip(
+                button,
+                widget::text(tooltip),
+                widget::tooltip::Position::Top,
+            ));
         }
 
         let bar = widget::Row::new()
             .align_y(cosmic::iced::Alignment::Center)
             .push(widget::scrollable::horizontal(crumbs).width(Length::Fill))
-            .push(
+            .push(themes::tooltip(
                 widget::button::icon(widget::icon::from_name("pencil-symbolic"))
                     .class(path_button_class(is_active))
-                    .tooltip(fl!("tooltip-edit-path"))
                     .on_press(PaneMessage::StartPathEdit),
-            );
+                widget::text(fl!("tooltip-edit-path")),
+                widget::tooltip::Position::Top,
+            ));
         // Folder buttons capture their own clicks, so only clicks on the
         // bar's empty space reach this and start editing.
         let bar = widget::mouse_area(bar).on_press(PaneMessage::StartPathEdit);
@@ -1950,7 +1964,7 @@ fn drive_menu(tab_state: Option<&TabState>) -> Option<Element<'static, PaneMessa
         PaneMessage::Navigate(drives[index].clone())
     });
     Some(
-        widget::tooltip(
+        themes::tooltip(
             menu,
             widget::text(fl!("tooltip-drive")),
             widget::tooltip::Position::Bottom,
