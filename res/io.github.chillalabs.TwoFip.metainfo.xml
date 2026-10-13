@@ -65,6 +65,18 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.1" date="2026-10-13">
+      <description>
+        <p>Folders, favorites and the panel layout:</p>
+        <ul>
+          <li>Folder Size: see what is taking up space inside a folder</li>
+          <li>Favorites: a warning when the folder you are saving is already a favorite, naming the entry it clashes with</li>
+          <li>List view: drag the dividers to resize the columns, remembered per tab</li>
+          <li>Settings: rounded corners in four steps, and a Windows-style appearance</li>
+          <li>Copying and moving: rename on the spot when a name is already taken</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-09">
       <description>
         <p>Servers, saved connections and new icon styles:</p>
