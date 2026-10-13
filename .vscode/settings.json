@@ -10,5 +10,14 @@
     },
     "search.exclude": {
         "**/target": true
+    },
+    "chat.tools.terminal.autoApprove": {
+        "just": true,
+        "cargo tree": true,
+        "cargo test": true,
+        "cargo fmt": true,
+        "git remote": true,
+        "git add": true,
+        "git commit": true
     }
 }
