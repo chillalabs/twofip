@@ -55,9 +55,61 @@ pub async fn list_dir(path: &Path) -> Result<Vec<DirEntry>, FsError> {
     Ok(entries)
 }
 
+/// Entries for a list of paths, e.g. search results shown in a tab: each
+/// one named by its path relative to `root` (`docs/notes.txt`), so files
+/// from different folders can be told apart. Paths that no longer exist are
+/// left out. Local paths only.
+pub async fn list_paths(root: &Path, paths: &[std::path::PathBuf]) -> Vec<DirEntry> {
+    let mut entries = Vec::with_capacity(paths.len());
+    for path in paths {
+        let Ok(metadata) = fs::symlink_metadata(path).await else {
+            continue;
+        };
+        let kind = if metadata.is_symlink() {
+            EntryKind::Symlink
+        } else if metadata.is_dir() {
+            EntryKind::Dir
+        } else {
+            EntryKind::File
+        };
+        let name = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
+        entries.push(DirEntry {
+            name,
+            path: path.clone(),
+            kind,
+            size: metadata.len(),
+            modified: metadata.modified().ok(),
+        });
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn lists_paths_relative_to_the_root_and_skips_missing_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("a.txt"), b"abc").unwrap();
+        let paths = vec![sub.join("a.txt"), dir.path().join("gone.txt"), sub.clone()];
+
+        let entries = list_paths(dir.path(), &paths).await;
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0].name,
+            Path::new("sub").join("a.txt").to_string_lossy()
+        );
+        assert_eq!(entries[0].size, 3);
+        assert_eq!(entries[1].kind, EntryKind::Dir);
+    }
     use std::fs;
 
     #[tokio::test]

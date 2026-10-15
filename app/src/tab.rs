@@ -41,6 +41,16 @@ pub struct TabState {
     pub dir_sizes: HashMap<PathBuf, DirSize>,
     /// List view column widths (dragged by the user), per tab.
     pub column_widths: fs_ops::settings::ColumnWidths,
+    /// Set when the tab shows search results ("View in Listbox") instead of
+    /// a folder: `current_dir` is then the folder that was searched.
+    pub results: Option<SearchResults>,
+}
+
+/// Find Files results shown as a tab, like Total Commander's "Feed to
+/// listbox".
+#[derive(Debug, Clone)]
+pub struct SearchResults {
+    pub paths: Vec<PathBuf>,
 }
 
 /// A folder's total size (everything inside, recursively), as calculated on
@@ -83,6 +93,7 @@ impl TabState {
             cursor: None,
             dir_sizes: HashMap::new(),
             column_widths: Default::default(),
+            results: None,
         }
     }
 

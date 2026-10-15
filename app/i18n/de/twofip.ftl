@@ -216,6 +216,8 @@ find-results = { $count ->
 find-no-results = Nichts gefunden.
 find-truncated = Die ersten { $count } Ergebnisse werden angezeigt; versuchen Sie einen genaueren Namen.
 find-go-to = Zur Datei
+find-listbox = In Liste anzeigen
+search-results-tab = Suche: { $pattern }
 
 ## Fenster „Über“
 about-2fip = Über 2fip

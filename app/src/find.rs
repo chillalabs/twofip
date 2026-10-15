@@ -169,6 +169,12 @@ pub fn view(find: &FindState) -> Element<'_, Message> {
                 .on_press_maybe(find.cursor.map(Message::FindGoTo)),
         )
         .secondary_action(widget::button::standard(fl!("close")).on_press(Message::FindClose))
+        // All results as a tab in the panel, to work on them like on files
+        // in a folder (Total Commander's "Feed to listbox").
+        .tertiary_action(
+            widget::button::text(fl!("find-listbox"))
+                .on_press_maybe((!find.hits.is_empty()).then_some(Message::FindToListbox)),
+        )
         .into()
 }
 

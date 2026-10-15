@@ -178,6 +178,8 @@ pub enum Message {
     FindEvent(u64, SearchEvent),
     FindHighlight(usize),
     FindGoTo(usize),
+    /// "View in Listbox": show all results as a tab.
+    FindToListbox,
     FindClose,
     /// The inotify watcher is ready (carries its command sender) or a watched
     /// folder changed.
@@ -510,6 +512,10 @@ impl App {
                 self.set_active_pane(id);
                 self.left.clear_drop_hover();
                 self.right.clear_drop_hover();
+                // Nothing goes into search results ("View in Listbox").
+                if self.pane(id).showing_results() {
+                    return Task::none();
+                }
                 self.drop_files(dest, paths, is_move)
             }
             Message::Pane(id, PaneMessage::ShowShellMenu) => {
@@ -1039,6 +1045,9 @@ impl App {
                     None => self.active_pane,
                 };
                 self.set_active_pane(id);
+                if self.pane(id).showing_results() {
+                    return Task::none();
+                }
                 let dest = self.pane(id).current_dir();
                 // Copy, or move with Shift held, as for drops within 2fip.
                 self.drop_files(dest, paths, crate::windows::shift_held())
@@ -1391,6 +1400,16 @@ impl App {
                     Some(hit) => self.pane_mut(self.active_pane).reveal(hit.path),
                     None => Task::none(),
                 }
+            }
+            Message::FindToListbox => {
+                let Some(find) = self.find.take() else {
+                    return Task::none();
+                };
+                find.cancel.cancel();
+                let paths = find.hits.into_iter().map(|hit| hit.path).collect();
+                let pattern = find.pattern.trim().to_string();
+                self.pane_mut(self.active_pane)
+                    .open_results(find.root, pattern, paths)
             }
             Message::FindClose => {
                 self.close_find();
@@ -2560,9 +2579,6 @@ impl App {
             .into()
     }
 
-    /// Files dropped into `dest` (drag and drop, from 2fip or another app):
-    /// copied, or moved if the drag asked for it or Shift is held. Files
-    /// already in `dest`, and folders dropped into themselves, are skipped.
     /// Windows: Explorer's right-click menu for the pane's selection; runs
     /// the 2fip action it picks (or refreshes after a Windows command).
     #[cfg(windows)]
@@ -2581,6 +2597,9 @@ impl App {
         Task::none()
     }
 
+    /// Files dropped into `dest` (drag and drop, from 2fip or another app):
+    /// copied, or moved if the drag asked for it or Shift is held. Files
+    /// already in `dest`, and folders dropped into themselves, are skipped.
     fn drop_files(&mut self, dest: PathBuf, paths: Vec<PathBuf>, is_move: bool) -> Task<Message> {
         if self.operation.is_some() {
             return Task::none();
@@ -2655,7 +2674,8 @@ impl App {
     }
 
     fn paste_to(&mut self, dest: PathBuf) -> Task<Message> {
-        if self.operation.is_some() {
+        // Pasting always targets the active pane: never search results.
+        if self.operation.is_some() || self.pane(self.active_pane).showing_results() {
             return Task::none();
         }
         let Some(clipboard) = &self.clipboard else {
@@ -2783,7 +2803,8 @@ impl App {
             return Task::none();
         }
         let sources = self.pane(self.active_pane).selected_paths();
-        if sources.is_empty() {
+        // F5/F6 can't copy or move into search results ("View in Listbox").
+        if sources.is_empty() || self.pane(self.active_pane.other()).showing_results() {
             return Task::none();
         }
         let dest = self.pane(self.active_pane.other()).current_dir();

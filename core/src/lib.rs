@@ -18,4 +18,4 @@ pub mod vfs;
 
 pub use entry::{DirEntry, EntryKind};
 pub use error::FsError;
-pub use listing::list_dir;
+pub use listing::{list_dir, list_paths};

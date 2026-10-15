@@ -14,7 +14,7 @@ use crate::dnd::{FileList, TabDrag};
 use crate::file_item::{format_size, Column, FileItem, ListingOptions};
 use crate::fl;
 use crate::keybinds::Action;
-use crate::tab::{tab_label, DirSize, PendingSelect, TabState};
+use crate::tab::{tab_label, DirSize, PendingSelect, SearchResults, TabState};
 use crate::themes;
 use cosmic::iced::clipboard::dnd::DndAction;
 use fs_ops::settings::{ColumnWidths, FontSize, ViewMode};
@@ -479,6 +479,15 @@ impl PaneState {
             }
             PaneMessage::Navigate(path) => self.navigate_active(path),
             PaneMessage::GoUp => {
+                // In search results, "up" goes back to the searched folder.
+                if let Some(root) = self
+                    .tabs
+                    .active_data::<TabState>()
+                    .filter(|tab_state| tab_state.results.is_some())
+                    .map(|tab_state| tab_state.current_dir.clone())
+                {
+                    return self.navigate_active(root);
+                }
                 let Some(tab_state) = self.tabs.active_data::<TabState>() else {
                     return Task::none();
                 };
@@ -754,6 +763,8 @@ impl PaneState {
             // made in.
             tab_state.filter = None;
             tab_state.dir_sizes.clear();
+            // Going to a folder leaves the search results behind.
+            tab_state.results = None;
         }
         let _ = self.tabs.text_set(tab_id, tab_label(&path));
         load_dir(self.id, tab_id, path)
@@ -1006,7 +1017,50 @@ impl PaneState {
         let Some(tab_state) = self.tabs.data::<TabState>(tab_id) else {
             return Task::none();
         };
-        load_dir(self.id, tab_id, tab_state.current_dir.clone())
+        match &tab_state.results {
+            Some(results) => load_results(
+                self.id,
+                tab_id,
+                tab_state.current_dir.clone(),
+                results.paths.clone(),
+            ),
+            None => load_dir(self.id, tab_id, tab_state.current_dir.clone()),
+        }
+    }
+
+    /// Whether the active tab shows search results ("View in Listbox"):
+    /// nothing can be copied or moved into it.
+    pub fn showing_results(&self) -> bool {
+        self.tabs
+            .active_data::<TabState>()
+            .is_some_and(|tab_state| tab_state.results.is_some())
+    }
+
+    /// Opens a new tab listing `paths` (search results found in `root`), where
+    /// they can be opened, copied, moved or deleted like in any folder.
+    pub fn open_results(
+        &mut self,
+        root: PathBuf,
+        pattern: String,
+        paths: Vec<PathBuf>,
+    ) -> Task<Message> {
+        self.cancel_path_edit();
+        let mut tab_state = TabState::new(root.clone());
+        if let Some(current) = self.tabs.active_data::<TabState>() {
+            tab_state.view_mode = current.view_mode;
+            tab_state.column_widths = current.column_widths;
+        }
+        tab_state.results = Some(SearchResults {
+            paths: paths.clone(),
+        });
+        self.tabs
+            .insert()
+            .text(fl!("search-results-tab", pattern = pattern))
+            .data(tab_state)
+            .closable()
+            .activate();
+        let tab_id = self.tabs.active();
+        load_results(self.id, tab_id, root, paths)
     }
 
     pub fn view(
@@ -1018,6 +1072,8 @@ impl PaneState {
     ) -> Element<'_, PaneMessage> {
         let active = self.tabs.active();
         let tab_state = self.tabs.data::<TabState>(active);
+        // Search results take no pasted files: Paste shows as unavailable.
+        let can_paste = can_paste && tab_state.is_none_or(|tab| tab.results.is_none());
 
         let tab_bar = self.tab_strip();
 
@@ -1134,7 +1190,12 @@ impl PaneState {
                         .height(Length::Fill)
                         .push(background_menu)
                         .push(listing);
-                    drop_target(listing, t.current_dir.clone(), false)
+                    // Search results aren't a folder: nothing can be dropped in.
+                    if t.results.is_some() {
+                        listing.into()
+                    } else {
+                        drop_target(listing, t.current_dir.clone(), false)
+                    }
                 }
             }
         };
@@ -1706,7 +1767,7 @@ fn draggable_entry<'a>(
         .drag_icon(move |grab_offset| {
             drag_picture(look, picture.clone(), &name, count, grab_offset)
         });
-    if item.is_dir() {
+    if item.is_dir() && tab_state.results.is_none() {
         drop_target(source, item.path.clone(), true)
     } else {
         source.into()
@@ -2013,6 +2074,15 @@ fn parent_folder_icon() -> widget::icon::Handle {
 fn thumbnail_workers() -> &'static tokio::sync::Semaphore {
     static WORKERS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
     WORKERS.get_or_init(|| tokio::sync::Semaphore::new(THUMBNAIL_WORKERS))
+}
+
+/// Loads search results (`paths`, found in `root`) into a tab, reported as
+/// the listing of `root`.
+fn load_results(pane: PaneId, tab: TabId, root: PathBuf, paths: Vec<PathBuf>) -> Task<Message> {
+    cosmic::task::future(async move {
+        let entries = fs_ops::list_paths(&root, &paths).await;
+        Message::Pane(pane, PaneMessage::DirLoaded(tab, root, Ok(entries)))
+    })
 }
 
 fn load_dir(pane: PaneId, tab: TabId, path: PathBuf) -> Task<Message> {

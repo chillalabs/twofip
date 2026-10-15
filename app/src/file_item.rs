@@ -277,8 +277,13 @@ fn split_name(name: &str, kind: EntryKind) -> (String, String) {
     if kind == EntryKind::Dir {
         return (name.to_string(), String::new());
     }
+    // Search results are named by a relative path ("docs/v1.2/notes"): only
+    // a dot in the last part starts an extension.
+    let file_start = name
+        .rfind(std::path::MAIN_SEPARATOR)
+        .map_or(0, |slash| slash + 1);
     match name.rfind('.') {
-        Some(dot) if dot > 0 && dot + 1 < name.len() => {
+        Some(dot) if dot > file_start && dot + 1 < name.len() => {
             (name[..dot].to_string(), name[dot + 1..].to_string())
         }
         _ => (name.to_string(), String::new()),
