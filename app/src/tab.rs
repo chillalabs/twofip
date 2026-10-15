@@ -469,7 +469,7 @@ mod tests {
             icon_style: IconStyle::Colorful,
             user_dirs: Arc::new(HashMap::new()),
             show_thumbnails: false,
-            font_size: fs_ops::settings::FontSize::Default,
+            font_size: fs_ops::settings::FontSize::Medium,
             separate_extension: true,
         }
     }
@@ -567,7 +567,7 @@ mod tests {
             icon_style: IconStyle::Colorful,
             user_dirs: Arc::new(HashMap::new()),
             show_thumbnails: false,
-            font_size: fs_ops::settings::FontSize::Default,
+            font_size: fs_ops::settings::FontSize::Medium,
             separate_extension: true,
         };
         let entries = names
@@ -654,7 +654,7 @@ mod tests {
             icon_style: IconStyle::Colorful,
             user_dirs: Arc::new(HashMap::new()),
             show_thumbnails: false,
-            font_size: fs_ops::settings::FontSize::Default,
+            font_size: fs_ops::settings::FontSize::Medium,
             separate_extension: true,
         });
         let mut names: Vec<String> = tab

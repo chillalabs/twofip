@@ -1312,7 +1312,20 @@ fn list_columns(separate_extension: bool) -> &'static [Column] {
         &[Column::Name, Column::Size, Column::Modified]
     }
 }
-const LIST_ICON_SIZE: u16 = 20;
+/// List view icon size: 20 px with the 14 px default text, shrinking with
+/// the File name size so smaller text also means shorter rows.
+pub fn list_icon_size(font_size: FontSize) -> u16 {
+    (f32::from(font_size.px()) * 10.0 / 7.0).round() as u16
+}
+
+/// Space above and below each list row: less for the smaller text sizes.
+pub fn row_padding_y(font_size: FontSize) -> u16 {
+    match font_size.px() {
+        12.. => 4,
+        10..=11 => 3,
+        _ => 2,
+    }
+}
 /// Space between the list's columns (header and rows alike).
 const LIST_COLUMN_GAP: u16 = 8;
 /// Horizontal padding inside each row (and its selection highlight).
@@ -1359,7 +1372,7 @@ fn one_line(text: String, font_size: FontSize) -> widget::Text<'static, cosmic::
 /// Listing text at the chosen size. The line height shrinks with it (1.5×,
 /// as libcosmic's 14 px body text uses 21 px), so smaller text also means
 /// shorter rows.
-fn name_text(text: String, font_size: FontSize) -> widget::Text<'static, cosmic::Theme> {
+pub fn name_text(text: String, font_size: FontSize) -> widget::Text<'static, cosmic::Theme> {
     use cosmic::iced::core::text::LineHeight;
     let px = f32::from(font_size.px());
     widget::text::body(text)
@@ -1554,7 +1567,10 @@ fn list_view<'a>(
                 widget::Row::new()
                     .spacing(8)
                     .align_y(cosmic::iced::Alignment::Center)
-                    .push(widget::icon(pane.item_icon(item)).size(LIST_ICON_SIZE))
+                    .push(
+                        widget::icon(pane.item_icon(item))
+                            .size(list_icon_size(pane.options.font_size)),
+                    )
                     .push(text)
                     .into()
             } else {
@@ -1567,7 +1583,7 @@ fn list_view<'a>(
             );
         }
         let row = widget::container(row)
-            .padding([4, LIST_ROW_PADDING_X])
+            .padding([row_padding_y(pane.options.font_size), LIST_ROW_PADDING_X])
             .width(Length::Fill)
             .class(selection_class(
                 tab_state.entries.is_active(entity),

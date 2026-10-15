@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use cosmic::iced::widget::canvas::{self, Program};
 use cosmic::iced::{mouse, Alignment, Background, Border, Color, Length, Point, Rectangle};
@@ -12,6 +12,7 @@ use fs_ops::folder_size::Entry;
 use crate::app::{Message, PaneId};
 use crate::file_item::{format_size, ListingOptions};
 use crate::fl;
+use crate::pane::name_text;
 use crate::themes;
 
 pub struct Panel {
@@ -28,6 +29,9 @@ pub struct Panel {
 }
 
 const MAX_OUTER_RINGS: usize = 5;
+/// Rows shown per expanded folder (its largest entries); the rest are
+/// summed up in one "… N more" row, so huge folders stay quick to show.
+const MAX_ROWS_PER_FOLDER: usize = 500;
 const TAU: f32 = std::f32::consts::PI * 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +78,11 @@ impl Panel {
             hovered: None,
             options,
         }
+    }
+
+    /// New listing options (File name size, icon style) from Settings.
+    pub fn set_options(&mut self, options: ListingOptions) {
+        self.options = options;
     }
 
     pub fn set_result(&mut self, result: Result<Entry, String>) {
@@ -262,6 +271,8 @@ impl Panel {
 }
 
 struct VisibleEntry {
+    /// A "… N more" row standing for the entries left out.
+    more: Option<usize>,
     name: String,
     path: PathBuf,
     size: u64,
@@ -293,6 +304,7 @@ fn collect_visible(
 ) {
     let is_expanded = expanded.contains(&entry.path);
     visible.push(VisibleEntry {
+        more: None,
         name: entry.name.clone(),
         path: entry.path.clone(),
         size: entry.size,
@@ -314,7 +326,7 @@ fn collect_visible(
             .map(|child| child.size)
             .max()
             .unwrap_or_default();
-        for child in &entry.children {
+        for child in entry.children.iter().take(MAX_ROWS_PER_FOLDER) {
             collect_visible(
                 child,
                 depth + 1,
@@ -328,7 +340,69 @@ fn collect_visible(
                 visible,
             );
         }
+        let hidden = &entry.children[entry.children.len().min(MAX_ROWS_PER_FOLDER)..];
+        if !hidden.is_empty() {
+            let size: u64 = hidden.iter().map(|child| child.size).sum();
+            visible.push(VisibleEntry {
+                more: Some(hidden.len()),
+                name: String::new(),
+                path: entry.path.clone(),
+                size,
+                depth: depth + 1,
+                is_dir: false,
+                has_children: false,
+                expanded: false,
+                selected: false,
+                color: color_for_ratio(size, child_max_size),
+                parent_percent: percent(size, entry.size),
+                root_percent: percent(size, size_context.root_size),
+                root_percent_value: percent_value(size, size_context.root_size),
+            });
+        }
     }
+}
+
+/// The "… N more" row: the left-out entries' count and total size.
+fn more_row(
+    entry: &VisibleEntry,
+    count: usize,
+    options: &ListingOptions,
+) -> Element<'static, Message> {
+    let indent = entry.depth as f32 * 18.0
+        + f32::from(crate::pane::list_icon_size(options.font_size)) * 2.0
+        + 12.0;
+    widget::container(
+        widget::Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(widget::Space::new().width(Length::Fixed(indent)))
+            .push(
+                name_text(fl!("folder-size-more", count = count), options.font_size)
+                    .width(Length::Fill),
+            )
+            .push(widget::Space::new().width(Length::Fixed(128.0)))
+            .push(
+                name_text(format_size(entry.size), options.font_size)
+                    .width(Length::Fixed(88.0))
+                    .align_x(cosmic::iced::alignment::Horizontal::Right),
+            )
+            .push(
+                name_text(entry.parent_percent.clone(), options.font_size)
+                    .width(Length::Fixed(88.0))
+                    .align_x(cosmic::iced::alignment::Horizontal::Right),
+            )
+            .push(
+                name_text(entry.root_percent.clone(), options.font_size)
+                    .width(Length::Fixed(88.0))
+                    .align_x(cosmic::iced::alignment::Horizontal::Right),
+            ),
+    )
+    .padding([
+        crate::pane::row_padding_y(options.font_size).saturating_sub(1),
+        6,
+    ])
+    .width(Length::Fill)
+    .into()
 }
 
 fn entry_row(
@@ -336,6 +410,9 @@ fn entry_row(
     target: PaneId,
     options: &ListingOptions,
 ) -> Element<'static, Message> {
+    if let Some(count) = entry.more {
+        return more_row(&entry, count, options);
+    }
     let disclosure = if entry.is_dir && entry.has_children {
         Some(if entry.expanded {
             "pan-down-symbolic"
@@ -346,11 +423,18 @@ fn entry_row(
         None
     };
     let disclosure_icon: Element<'static, Message> = if let Some(disclosure) = disclosure {
+        // Small and unpadded, so it doesn't make the rows taller than the text.
         widget::button::icon(icon::from_name(disclosure))
+            .icon_size(crate::pane::list_icon_size(options.font_size))
+            .padding(0)
             .on_press(Message::FolderSizeToggle(target, entry.path.clone()))
             .into()
     } else {
-        widget::Space::new().width(Length::Fixed(16.0)).into()
+        widget::Space::new()
+            .width(Length::Fixed(f32::from(crate::pane::list_icon_size(
+                options.font_size,
+            ))))
+            .into()
     };
     let mut name = widget::Row::new()
         .spacing(6)
@@ -364,9 +448,12 @@ fn entry_row(
                 entry.is_dir,
                 options,
             ))
-            .size(16),
+            .size(crate::pane::list_icon_size(options.font_size)),
         )
-        .push(widget::text::body(entry.name).wrapping(cosmic::iced::core::text::Wrapping::None))
+        .push(
+            name_text(entry.name, options.font_size)
+                .wrapping(cosmic::iced::core::text::Wrapping::None),
+        )
         .width(Length::Fill);
 
     let row = widget::Row::new()
@@ -379,17 +466,17 @@ fn entry_row(
                 .girth(Length::Fixed(12.0)),
         )
         .push(
-            widget::text::body(format_size(entry.size))
+            name_text(format_size(entry.size), options.font_size)
                 .width(Length::Fixed(88.0))
                 .align_x(cosmic::iced::alignment::Horizontal::Right),
         )
         .push(
-            widget::text::body(entry.parent_percent)
+            name_text(entry.parent_percent, options.font_size)
                 .width(Length::Fixed(88.0))
                 .align_x(cosmic::iced::alignment::Horizontal::Right),
         )
         .push(
-            widget::text::body(entry.root_percent)
+            name_text(entry.root_percent, options.font_size)
                 .width(Length::Fixed(88.0))
                 .align_x(cosmic::iced::alignment::Horizontal::Right),
         );
@@ -399,7 +486,10 @@ fn entry_row(
         entry.color
     };
     let row = widget::container(row)
-        .padding([3, 6])
+        .padding([
+            crate::pane::row_padding_y(options.font_size).saturating_sub(1),
+            6,
+        ])
         .width(Length::Fill)
         .class(cosmic::theme::Container::custom(move |_| {
             widget::container::Style {
@@ -485,30 +575,25 @@ fn color_with_alpha(color: Color, alpha: f32) -> Color {
     Color::from_rgba(color.r, color.g, color.b, alpha)
 }
 
-fn find_entry<'a>(entry: &'a Entry, path: &PathBuf) -> Option<&'a Entry> {
-    if entry.path == *path {
-        return Some(entry);
-    }
-
-    for child in &entry.children {
-        if let Some(found) = find_entry(child, path) {
-            return Some(found);
+/// The entry at `path`. Goes straight down the folders that contain it
+/// (one level per path component) instead of visiting the whole tree, which
+/// takes a third of a second for a home folder of a million files.
+fn find_entry<'a>(entry: &'a Entry, path: &Path) -> Option<&'a Entry> {
+    let mut current = entry;
+    loop {
+        if current.path == *path {
+            return Some(current);
         }
+        current = current
+            .children
+            .iter()
+            .find(|child| path.starts_with(&child.path))?;
     }
-
-    None
 }
 
-fn find_parent_entry<'a>(entry: &'a Entry, path: &PathBuf) -> Option<&'a Entry> {
-    for child in &entry.children {
-        if child.path == *path {
-            return Some(entry);
-        }
-        if let Some(parent) = find_parent_entry(child, path) {
-            return Some(parent);
-        }
-    }
-    None
+/// The folder that directly contains `path` (same quick descent).
+fn find_parent_entry<'a>(entry: &'a Entry, path: &Path) -> Option<&'a Entry> {
+    find_entry(entry, path.parent()?).filter(|found| found.is_dir)
 }
 
 #[derive(Clone)]
@@ -602,8 +687,19 @@ impl RingChart {
     }
 }
 
+/// The chart's per-widget state: what the mouse is over, and the drawn
+/// rings, kept until another folder is shown (moving the mouse no longer
+/// redraws every segment).
+#[derive(Default)]
+struct ChartState {
+    hovered: Option<(PathBuf, String, String)>,
+    cache: canvas::Cache,
+    /// Which chart `cache` holds: its center folder and segment count.
+    drawn: std::cell::RefCell<Option<(PathBuf, usize)>>,
+}
+
 impl Program<Message, cosmic::Theme> for RingChart {
-    type State = Option<(PathBuf, String, String)>;
+    type State = ChartState;
 
     fn update(
         &self,
@@ -619,14 +715,15 @@ impl Program<Message, cosmic::Theme> for RingChart {
             let hovered = cursor
                 .position_in(bounds)
                 .and_then(|position| self.hovered_item(position, bounds));
-            if *state != hovered {
-                *state = hovered.clone();
+            if state.hovered != hovered {
+                state.hovered = hovered.clone();
                 return Some(canvas::Action::publish(Message::FolderSizeHover(
                     self.target,
                     hovered,
                 )));
             }
-            return Some(canvas::Action::request_redraw());
+            // Nothing in the chart depends on the mouse: no redraw needed.
+            return None;
         }
         let canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event else {
             return None;
@@ -645,17 +742,39 @@ impl Program<Message, cosmic::Theme> for RingChart {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &cosmic::Renderer,
         _theme: &cosmic::Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let key = (self.center_path.clone(), self.segments.len());
+        if state.drawn.borrow().as_ref() != Some(&key) {
+            state.cache.clear();
+            *state.drawn.borrow_mut() = Some(key);
+        }
+        // The cache also redraws by itself when the size changes.
+        vec![state.cache.draw(renderer, bounds.size(), |frame| {
+            self.draw_rings(frame, bounds)
+        })]
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Self::State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        mouse::Interaction::Pointer
+    }
+}
+
+impl RingChart {
+    fn draw_rings(&self, frame: &mut canvas::Frame, bounds: Rectangle) {
         let center = frame.center();
         let max_radius = bounds.width.min(bounds.height) / 2.0 - 8.0;
         if max_radius <= 0.0 {
-            return vec![frame.into_geometry()];
+            return;
         }
         let (center_radius, band) = self.ring_dimensions(max_radius);
 
@@ -687,17 +806,6 @@ impl Program<Message, cosmic::Theme> for RingChart {
                     .with_width(1.0),
             );
         }
-
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        _state: &Self::State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        mouse::Interaction::Pointer
     }
 }
 
@@ -802,6 +910,68 @@ fn polar_point(center: Point, radius: f32, angle: f32) -> Point {
 mod tests {
     use super::*;
 
+    fn file(path: &str, size: u64) -> Entry {
+        Entry {
+            name: Path::new(path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            path: PathBuf::from(path),
+            size,
+            is_dir: false,
+            children: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn finds_entries_and_parents_by_going_down_the_tree() {
+        let mut inner = file("/r/a/b", 0);
+        inner.is_dir = true;
+        inner.children = vec![file("/r/a/b/c.txt", 5)];
+        let mut a = file("/r/a", 0);
+        a.is_dir = true;
+        a.children = vec![file("/r/a/x.txt", 1), inner];
+        let mut root = file("/r", 0);
+        root.is_dir = true;
+        root.children = vec![file("/r/ab.txt", 2), a];
+
+        let found = find_entry(&root, Path::new("/r/a/b/c.txt")).unwrap();
+        assert_eq!(found.size, 5);
+        // "/r/ab.txt" must not be taken for a folder containing "/r/a/...".
+        assert!(find_entry(&root, Path::new("/r/a/x.txt")).is_some());
+        assert_eq!(
+            find_parent_entry(&root, Path::new("/r/a/b")).unwrap().path,
+            PathBuf::from("/r/a")
+        );
+        assert!(find_parent_entry(&root, Path::new("/r")).is_none());
+        assert!(find_entry(&root, Path::new("/r/missing")).is_none());
+    }
+
+    #[test]
+    fn big_folders_show_their_largest_entries_and_one_more_row() {
+        let mut root = file("/r", 0);
+        root.is_dir = true;
+        root.children = (0..MAX_ROWS_PER_FOLDER + 20)
+            .map(|index| file(&format!("/r/f{index}"), 1))
+            .collect();
+        root.size = root.children.len() as u64;
+        let expanded = HashSet::from([root.path.clone()]);
+        let context = SizeContext {
+            parent_size: root.size,
+            root_size: root.size,
+            sibling_max_size: root.size,
+        };
+        let mut visible = Vec::new();
+        collect_visible(&root, 0, context, &expanded, &root.path, &mut visible);
+
+        // The folder itself, its 500 largest entries, and "… 20 more".
+        assert_eq!(visible.len(), 1 + MAX_ROWS_PER_FOLDER + 1);
+        let more = visible.last().unwrap();
+        assert_eq!(more.more, Some(20));
+        assert_eq!(more.size, 20);
+    }
+
     #[test]
     fn clicking_the_focused_folder_moves_up_one_level() {
         let root_path = PathBuf::from("/analysis");
@@ -833,7 +1003,7 @@ mod tests {
                 icon_style: fs_ops::settings::IconStyle::Colorful,
                 user_dirs: std::sync::Arc::new(HashMap::new()),
                 show_thumbnails: false,
-                font_size: fs_ops::settings::FontSize::Default,
+                font_size: fs_ops::settings::FontSize::Medium,
                 separate_extension: true,
             },
         );

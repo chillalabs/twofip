@@ -119,7 +119,6 @@ pub enum Message {
     ShowHiddenFilesToggled(bool),
     ThumbnailsToggled(bool),
     SeparateExtensionToggled(bool),
-    WindowsStyleToggled(bool),
     /// Index into [`localize::LANGUAGES`]; applied immediately.
     LanguageSelected(usize),
     /// Index into [`ICON_STYLES`].
@@ -223,11 +222,12 @@ fn suggested_conflict_rename_name(path: &Path) -> String {
 }
 
 /// File name sizes offered in Settings, in dropdown order.
-const FONT_SIZES: [FontSize; 4] = [
-    FontSize::Default,
+const FONT_SIZES: [FontSize; 5] = [
+    FontSize::Medium,
     FontSize::Small,
     FontSize::Smaller,
-    FontSize::Tiny,
+    FontSize::VerySmall,
+    FontSize::ExtraSmall,
 ];
 
 /// Where the Favorites dialog's keyboard focus is: on the list (see
@@ -257,19 +257,17 @@ pub enum SettingsRow {
     Thumbnails,
     Language,
     ColorTheme,
-    WindowsStyle,
     Corners,
     IconStyle,
     FontSize,
 }
 
-const SETTINGS_ROWS: [SettingsRow; 9] = [
+const SETTINGS_ROWS: [SettingsRow; 8] = [
     SettingsRow::ShowHidden,
     SettingsRow::SeparateExtension,
     SettingsRow::Thumbnails,
     SettingsRow::Language,
     SettingsRow::ColorTheme,
-    SettingsRow::WindowsStyle,
     SettingsRow::Corners,
     SettingsRow::IconStyle,
     SettingsRow::FontSize,
@@ -281,10 +279,11 @@ fn step_index(index: usize, step: isize, len: usize) -> usize {
 }
 
 /// Color themes offered in Settings, in dropdown order.
-const COLOR_THEMES: [ColorTheme; 15] = [
+const COLOR_THEMES: [ColorTheme; 16] = [
     ColorTheme::System,
     ColorTheme::Light,
     ColorTheme::Dark,
+    ColorTheme::Windows,
     // 2fip's own palettes, alphabetically.
     ColorTheme::AyuDark,
     ColorTheme::CatppuccinMacchiato,
@@ -318,6 +317,7 @@ fn color_theme_name(theme: ColorTheme) -> String {
         ColorTheme::MonokaiPro => "Monokai Pro".to_string(),
         ColorTheme::SolarizedDark => "Solarized Dark".to_string(),
         ColorTheme::GruvboxDark => "Gruvbox Dark".to_string(),
+        ColorTheme::Windows => "Windows".to_string(),
     }
 }
 
@@ -334,10 +334,11 @@ const ICON_STYLES: [IconStyle; 5] = [
 fn font_size_name(size: FontSize) -> String {
     let px = size.px();
     match size {
-        FontSize::Default => fl!("font-size-default", px = px),
+        FontSize::Medium => fl!("font-size-medium", px = px),
         FontSize::Small => fl!("font-size-small", px = px),
         FontSize::Smaller => fl!("font-size-smaller", px = px),
-        FontSize::Tiny => fl!("font-size-tiny", px = px),
+        FontSize::VerySmall => fl!("font-size-very-small", px = px),
+        FontSize::ExtraSmall => fl!("font-size-tiny", px = px),
     }
 }
 
@@ -1068,12 +1069,6 @@ impl App {
                 self.settings.show_thumbnails = show;
                 self.apply_settings()
             }
-            Message::WindowsStyleToggled(windows_style) => {
-                self.focus_settings_row(SettingsRow::WindowsStyle);
-                self.settings.windows_style = windows_style;
-                self.persist_settings();
-                self.apply_color_theme()
-            }
             Message::LanguageSelected(index) => {
                 self.focus_settings_row(SettingsRow::Language);
                 if let Some((code, _)) = localize::LANGUAGES.get(index) {
@@ -1781,6 +1776,9 @@ impl App {
     /// (returning any thumbnail loading that newly needs to start).
     fn apply_settings(&mut self) -> Task<Message> {
         let options = self.listing_options();
+        if let Some(panel) = &mut self.folder_size {
+            panel.set_options(options.clone());
+        }
         let left = self.left.set_options(options.clone());
         let right = self.right.set_options(options);
         self.persist_settings();
@@ -1796,18 +1794,14 @@ impl App {
     /// "System" goes back to the desktop's current theme (libcosmic keeps it
     /// up to date meanwhile).
     fn apply_color_theme(&self) -> Task<Message> {
-        let theme = if self.settings.windows_style {
-            themes::windows_like()
-        } else {
-            match self.settings.color_theme {
-                ColorTheme::System => self.core.system_theme().clone(),
-                ColorTheme::Light => cosmic::Theme::light(),
-                ColorTheme::Dark => cosmic::Theme::dark(),
-                own => themes::build(own).unwrap_or_else(cosmic::Theme::dark),
-            }
+        let theme = match self.settings.color_theme {
+            ColorTheme::System => self.core.system_theme().clone(),
+            ColorTheme::Light => cosmic::Theme::light(),
+            ColorTheme::Dark => cosmic::Theme::dark(),
+            ColorTheme::Windows => themes::windows_like(),
+            own => themes::build(own).unwrap_or_else(cosmic::Theme::dark),
         };
-        let system =
-            !self.settings.windows_style && self.settings.color_theme == ColorTheme::System;
+        let system = self.settings.color_theme == ColorTheme::System;
         cosmic::command::set_theme(themes::with_corners(&theme, self.settings.corners, system))
     }
 
@@ -1908,7 +1902,6 @@ impl App {
                     .unwrap_or(0);
                 Message::ColorThemeSelected(step_index(current, step, COLOR_THEMES.len()))
             }
-            SettingsRow::WindowsStyle => Message::WindowsStyleToggled(!self.settings.windows_style),
             SettingsRow::Corners => {
                 let current = CORNERS
                     .iter()
@@ -2434,13 +2427,6 @@ impl App {
                         )),
                 ),
             )
-            .add(self.checkbox_row(
-                SettingsRow::WindowsStyle,
-                fl!("settings-windows-style"),
-                fl!("settings-windows-style-description"),
-                self.settings.windows_style,
-                Message::WindowsStyleToggled,
-            ))
             .add(
                 self.settings_row(
                     SettingsRow::Corners,

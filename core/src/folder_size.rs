@@ -1,5 +1,7 @@
+use std::cmp::Reverse;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -27,43 +29,73 @@ pub fn scan(root: &Path) -> Result<Entry, String> {
         .and_then(|name| name.to_str())
         .map(str::to_owned)
         .unwrap_or_else(|| root.display().to_string());
-    scan_directory(root, name)
+    // Extra threads for subfolders, on top of the calling one.
+    let spare_threads = std::thread::available_parallelism().map_or(1, |n| n.get()) - 1;
+    scan_directory(root, name, &AtomicUsize::new(spare_threads))
 }
 
-fn scan_directory(path: &Path, name: String) -> Result<Entry, String> {
+/// Takes one of the spare threads, if any is left.
+fn take_thread(spare: &AtomicUsize) -> bool {
+    spare
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
+        .is_ok()
+}
+
+/// Scans `path` recursively. Subfolders go to spare threads while there are
+/// any (the rest are scanned on this one), so a big tree uses every core.
+fn scan_directory(path: &Path, name: String, spare: &AtomicUsize) -> Result<Entry, String> {
     let read_dir =
         fs::read_dir(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let mut children = Vec::new();
+    let mut subfolders = Vec::new();
 
     for entry in read_dir.flatten() {
-        let child_path = entry.path();
-        let Ok(metadata) = fs::symlink_metadata(&child_path) else {
+        // The type comes with the listing, and the size is read relative to
+        // the open folder: no extra lookup of the full path. Neither follows
+        // symbolic links.
+        let Ok(file_type) = entry.file_type() else {
             continue;
         };
         let child_name = entry.file_name().to_string_lossy().into_owned();
-        let child = if metadata.is_dir() {
-            match scan_directory(&child_path, child_name) {
-                Ok(child) => child,
-                Err(_) => continue,
-            }
-        } else {
-            Entry {
-                name: child_name,
-                path: child_path,
-                size: metadata.len(),
-                is_dir: false,
-                children: Vec::new(),
-            }
+        if file_type.is_dir() {
+            subfolders.push((entry.path(), child_name));
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
         };
-        children.push(child);
+        children.push(Entry {
+            name: child_name,
+            path: entry.path(),
+            size: metadata.len(),
+            is_dir: false,
+            children: Vec::new(),
+        });
     }
 
-    children.sort_by(|left, right| {
-        right
-            .size
-            .cmp(&left.size)
-            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    std::thread::scope(|scope| {
+        let mut threads = Vec::new();
+        for (child_path, child_name) in subfolders {
+            if take_thread(spare) {
+                threads.push(scope.spawn(move || {
+                    let result = scan_directory(&child_path, child_name, spare);
+                    spare.fetch_add(1, Ordering::AcqRel);
+                    result
+                }));
+            } else if let Ok(child) = scan_directory(&child_path, child_name, spare) {
+                children.push(child);
+            }
+        }
+        for thread in threads {
+            if let Ok(Ok(child)) = thread.join() {
+                children.push(child);
+            }
+        }
     });
+
+    // Largest first; the lower-case names are made once per entry, not on
+    // every comparison.
+    children.sort_by_cached_key(|child| (Reverse(child.size), child.name.to_lowercase()));
     let size = children.iter().map(|child| child.size).sum();
 
     Ok(Entry {

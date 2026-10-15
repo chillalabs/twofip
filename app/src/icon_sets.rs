@@ -255,7 +255,7 @@ fn file_svg(set: IconSet, category: FileCategory) -> String {
 fn folder_svg(set: IconSet, dir: Option<UserDir>) -> String {
     let (front, back, symbol) = folder_style(dir);
     match set {
-        IconSet::Vivid => svg(
+        IconSet::Vivid => folder_frame(
             "",
             &format!(
                 r##"<path d="{FOLDER_BACK}" fill="{back}"/><path d="{FOLDER_FRONT}" fill="{front}"/><path d="M8 19h32" stroke="#fff" stroke-opacity=".35" stroke-width="1.5" stroke-linecap="round"/>"##
@@ -275,7 +275,7 @@ fn folder_svg(set: IconSet, dir: Option<UserDir>) -> String {
                     symbol.replace("{c}", "#fff")
                 );
             }
-            svg(&defs, &body)
+            folder_frame(&defs, &body)
         }
         IconSet::Soft => {
             let defs =
@@ -289,9 +289,19 @@ fn folder_svg(set: IconSet, dir: Option<UserDir>) -> String {
                     symbol.replace("{c}", "#2a7fd0")
                 );
             }
-            svg(&defs, &body)
+            folder_frame(&defs, &body)
         }
     }
+}
+
+/// A folder's SVG, moved up 3 units: its front (the part the eye sees)
+/// sits low under the tab, so without this it looks lower than file icons
+/// and the text next to it.
+fn folder_frame(defs: &str, body: &str) -> String {
+    svg(
+        defs,
+        &format!(r#"<g transform="translate(0 -3)">{body}</g>"#),
+    )
 }
 
 /// What an icon shows.

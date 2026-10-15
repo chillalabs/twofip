@@ -33,7 +33,9 @@ struct Palette {
 /// libcosmic's (System, Light, Dark).
 fn palette(theme: ColorTheme) -> Option<Palette> {
     let palette = match theme {
-        ColorTheme::System | ColorTheme::Light | ColorTheme::Dark => return None,
+        ColorTheme::System | ColorTheme::Light | ColorTheme::Dark | ColorTheme::Windows => {
+            return None
+        }
         // https://draculatheme.com
         ColorTheme::Dracula => Palette {
             background: 0x282a36,

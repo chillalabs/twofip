@@ -23,9 +23,6 @@ pub struct Settings {
     pub separate_extension: bool,
     /// 2fip's colors: the desktop's theme, or one of 2fip's own.
     pub color_theme: ColorTheme,
-    /// Flattens the theme into a Windows-like look: blue accent, light gray
-    /// surfaces and square-ish controls.
-    pub windows_style: bool,
     /// How rounded the window, buttons, menus and panels are.
     pub corners: Corners,
 }
@@ -56,6 +53,8 @@ pub enum ColorTheme {
     Light,
     /// COSMIC's standard dark theme, whatever the desktop uses.
     Dark,
+    /// A flatter, Windows-like light look: blue accent, light-gray surfaces.
+    Windows,
     /// The Dracula palette (dark).
     Dracula,
     Everforest,
@@ -74,25 +73,34 @@ pub enum ColorTheme {
 
 /// Text size for file and folder names; smaller sizes fit more files on
 /// screen (the list's rows get shorter too).
+/// Saved as kebab-case names; the names of earlier versions still load
+/// ("default" is Medium, "tiny" was 11 px and is now Very small, the
+/// short-lived 9 px "smallest" is now Tiny).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum FontSize {
     /// libcosmic's normal body text size.
     #[default]
-    Default,
+    #[serde(alias = "default")]
+    Medium,
     Small,
     Smaller,
-    Tiny,
+    #[serde(alias = "tiny")]
+    VerySmall,
+    /// The smallest size (10 px), shown as "Tiny".
+    #[serde(alias = "smallest")]
+    ExtraSmall,
 }
 
 impl FontSize {
     /// Size in pixels.
     pub fn px(self) -> u16 {
         match self {
-            FontSize::Default => 14,
+            FontSize::Medium => 14,
             FontSize::Small => 13,
             FontSize::Smaller => 12,
-            FontSize::Tiny => 11,
+            FontSize::VerySmall => 11,
+            FontSize::ExtraSmall => 10,
         }
     }
 }
@@ -157,7 +165,6 @@ impl Default for Settings {
             name_font_size: FontSize::default(),
             separate_extension: true,
             color_theme: ColorTheme::default(),
-            windows_style: false,
             corners: Corners::default(),
         }
     }
@@ -176,10 +183,19 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 }
 
 fn load_from(path: &Path) -> Settings {
-    fs::read_to_string(path)
+    let Some(value) = fs::read_to_string(path)
         .ok()
-        .and_then(|contents| serde_json::from_str(&contents).ok())
-        .unwrap_or_default()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+    else {
+        return Settings::default();
+    };
+    // Up to 0.2.4 the Windows look was a checkbox on top of the color theme.
+    let windows_style = value.get("windows_style") == Some(&serde_json::Value::Bool(true));
+    let mut settings: Settings = serde_json::from_value(value).unwrap_or_default();
+    if windows_style {
+        settings.color_theme = ColorTheme::Windows;
+    }
+    settings
 }
 
 fn save_to(path: &Path, settings: &Settings) -> Result<(), String> {
@@ -267,7 +283,6 @@ mod tests {
             name_font_size: FontSize::Smaller,
             separate_extension: false,
             color_theme: ColorTheme::Dracula,
-            windows_style: false,
             corners: Corners::Small,
         };
 
@@ -287,21 +302,46 @@ mod tests {
         assert!(!loaded.hide_hidden_files);
         assert_eq!(loaded.language, "system");
         assert_eq!(loaded.icon_style, IconStyle::Colorful);
-        assert_eq!(loaded.name_font_size, FontSize::Default);
+        assert_eq!(loaded.name_font_size, FontSize::Medium);
         assert!(loaded.separate_extension);
         assert_eq!(loaded.color_theme, ColorTheme::System);
     }
 
     #[test]
     fn font_sizes_get_smaller_and_default_matches_libcosmic() {
-        assert_eq!(FontSize::Default.px(), 14);
+        assert_eq!(FontSize::Medium.px(), 14);
         let sizes = [
-            FontSize::Default,
+            FontSize::Medium,
             FontSize::Small,
             FontSize::Smaller,
-            FontSize::Tiny,
+            FontSize::VerySmall,
+            FontSize::ExtraSmall,
         ];
         assert!(sizes.windows(2).all(|pair| pair[0].px() > pair[1].px()));
+        assert_eq!(FontSize::ExtraSmall.px(), 10);
+    }
+
+    #[test]
+    fn the_old_windows_checkbox_becomes_the_windows_theme() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            br#"{ "color_theme": "nord", "windows_style": true }"#,
+        )
+        .unwrap();
+        assert_eq!(load_from(&path).color_theme, ColorTheme::Windows);
+    }
+
+    #[test]
+    fn old_font_size_names_still_load() {
+        let old: FontSize = serde_json::from_str(r#""default""#).unwrap();
+        assert_eq!(old, FontSize::Medium);
+        let old: FontSize = serde_json::from_str(r#""tiny""#).unwrap();
+        assert_eq!(old, FontSize::VerySmall);
+        // 9 px, removed again in 0.2.5.
+        let old: FontSize = serde_json::from_str(r#""smallest""#).unwrap();
+        assert_eq!(old, FontSize::ExtraSmall);
     }
 
     #[test]
