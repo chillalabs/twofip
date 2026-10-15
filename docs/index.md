@@ -22,7 +22,7 @@ files between them is one key away.
 - **Servers:** browse SFTP, FTP and FTPS folders like local ones, and save
   connections with their passwords in the system keyring.
 - **Find files**, a **quick filter**, **favorites**, **thumbnails**, **folder
-  sizes**, **drag and drop**, **color themes** and several languages.
+  sizes** with a [Folder Size](folder-size.html) analyzer, **drag and drop**, **color themes** and several languages.
 
 ## Where to start
 

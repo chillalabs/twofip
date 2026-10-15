@@ -62,7 +62,8 @@ button and <kbd>Enter</kbd> confirms; <kbd>Esc</kbd> cancels.
 ## More
 
 - **Folder sizes:** select folders and press <kbd>Space</kbd>; their total size
-  appears in the Size column.
+  appears in the Size column. To see what takes the space inside a folder, use
+  [Folder Size](folder-size.html).
 - **Details:** <kbd>Alt</kbd>+<kbd>Enter</kbd> shows type, size, dates,
   permissions and owner.
 - **Compress…** (right-click) packs the selection into a ZIP archive.

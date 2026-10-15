@@ -9,6 +9,8 @@
   url: /files.html
 - title: Finding files
   url: /find.html
+- title: Folder Size
+  url: /folder-size.html
 - title: Favorites
   url: /favorites.html
 - title: Servers and connections
