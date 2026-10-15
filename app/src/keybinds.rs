@@ -101,6 +101,34 @@ impl MenuAction for Action {
     }
 }
 
+/// Second shortcuts for actions that already have one in
+/// [`default_keybinds`]. Kept apart so menus keep showing the main one
+/// (they show one shortcut per action).
+pub fn extra_keybinds() -> Vec<(KeyBind, Action)> {
+    vec![
+        // Total Commander's rename (F2 still works).
+        (
+            KeyBind {
+                modifiers: vec![Modifier::Shift],
+                key: Key::Named(Named::F6),
+            },
+            Action::Rename,
+        ),
+    ]
+}
+
+/// The action for a key press: the main shortcuts first, then the extra ones.
+pub fn action_for(
+    keybinds: &HashMap<KeyBind, Action>,
+    modifiers: cosmic::iced::keyboard::Modifiers,
+    key: &Key,
+) -> Option<Action> {
+    keybinds
+        .iter()
+        .chain(extra_keybinds().iter().map(|(bind, action)| (bind, action)))
+        .find_map(|(bind, action)| bind.matches(modifiers, key, None).then_some(*action))
+}
+
 pub fn default_keybinds() -> HashMap<KeyBind, Action> {
     let mut map = HashMap::new();
 
@@ -265,4 +293,29 @@ pub fn default_keybinds() -> HashMap<KeyBind, Action> {
     bind(&[Modifier::Ctrl], Key::Character("q".into()), Action::Quit);
 
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmic::iced::keyboard::Modifiers;
+
+    #[test]
+    fn shift_f6_renames_like_f2_and_f6_still_moves() {
+        let keybinds = default_keybinds();
+        let f6 = Key::Named(Named::F6);
+        let f2 = Key::Named(Named::F2);
+        assert_eq!(
+            action_for(&keybinds, Modifiers::SHIFT, &f6),
+            Some(Action::Rename)
+        );
+        assert_eq!(
+            action_for(&keybinds, Modifiers::empty(), &f2),
+            Some(Action::Rename)
+        );
+        assert_eq!(
+            action_for(&keybinds, Modifiers::empty(), &f6),
+            Some(Action::Move)
+        );
+    }
 }

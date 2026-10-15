@@ -11,7 +11,7 @@ panel unless a dialog or a side panel is open.
 | Key | Action |
 |---|---|
 | <kbd>F1</kbd> | This help |
-| <kbd>F2</kbd> | Rename |
+| <kbd>F2</kbd> or <kbd>Shift</kbd>+<kbd>F6</kbd> | Rename |
 | <kbd>F3</kbd> | View (open with the default app) |
 | <kbd>F4</kbd> | Edit (open in the text editor) |
 | <kbd>F5</kbd> | Copy to the other panel |

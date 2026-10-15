@@ -48,6 +48,7 @@ desktop, inspired by Total Commander and COSMIC Files. Written in Rust with
 | Backspace, ← | Parent folder |
 | Space | Calculate the size of the selected folders |
 | F2 … F9 | Rename, View, Edit, Copy, Move, New folder, Delete, Terminal |
+| Shift+F6 | Rename (like F2, as in Total Commander) |
 | Shift+Delete, Shift+F8 | Delete permanently (without the trash), after a confirmation |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
 | Ctrl+A | Select all |

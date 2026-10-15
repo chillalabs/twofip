@@ -724,9 +724,7 @@ impl App {
                 if let Some(task) = self.settings_key(modifiers, &key) {
                     return task;
                 }
-                let action = self.keybinds.iter().find_map(|(bind, action)| {
-                    bind.matches(modifiers, &key, None).then_some(*action)
-                });
+                let action = crate::keybinds::action_for(&self.keybinds, modifiers, &key);
                 // A side panel keeps the keyboard: keys it doesn't use must not
                 // reach the file panels behind it (e.g. Delete trashing files).
                 // Only the shortcuts that switch panels or quit still work.

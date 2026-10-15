@@ -44,7 +44,8 @@ file already exists, 2fip asks: **Replace**, **Skip**, or the same for all.
 
 ## Renaming and new folders
 
-- **<kbd>F2</kbd>** renames the selected item.
+- **<kbd>F2</kbd>** (or <kbd>Shift</kbd>+<kbd>F6</kbd>, as in Total Commander)
+  renames the selected item.
 - **<kbd>F7</kbd>** creates a new folder.
 
 ## Deleting
