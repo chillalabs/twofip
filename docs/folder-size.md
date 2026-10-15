@@ -9,14 +9,29 @@ and files are the largest, as a list and as a ring chart.
 ## Open it
 
 1. In the active panel, select **one folder** (on your computer, not on a
-   server).
+   server), or select nothing to analyze the folder the panel shows.
 2. Click the **Folder Size** button at the top of the window, next to
    Refresh and Find.
 
 The analysis takes the place of the **other panel**, so the folder you're in
-stays visible. While 2fip scans the folder you see *Calculating folder
-sizes…*; a big folder can take a few seconds. Click the button again, or
+stays visible. While 2fip scans, it shows how many files and folders it has
+counted so far; **Cancel** stops a long scan. Click the button again, or
 **Close**, to bring the panel back.
+
+## A whole drive
+
+To see what fills a drive, go to its top folder (`/` on Linux, `C:\` on
+Windows: use the drive menu at the left of the panel), select nothing and
+click **Folder Size**.
+
+- A bar at the top shows the drive's **used, total and free** space.
+- 2fip stays on that drive: it doesn't go into other disks mounted inside
+  it, network shares, or system folders like `/proc`.
+- **Not counted** is the space the drive uses that 2fip couldn't see:
+  system files and folders you aren't allowed to read, and the file system's
+  own data. The number of folders it couldn't read is shown too.
+- In the Flatpak version, the computer's system folders that the sandbox
+  can't see (such as `/var`) are part of "Not counted".
 
 ## The list
 
@@ -60,10 +75,11 @@ After a copy, move or delete, the analysis updates by itself.
 
 ## Good to know
 
-- Sizes are the files' own sizes (like the Size column), not the space
-  they take on the disk, so the total can differ a little from `du`.
+- Sizes are the **space on the disk**, like `du`: a file that shares its
+  data with others (hard links, common in Flatpak's storage) is counted
+  once, and it shows 0 the other times.
 - Symbolic links count as small files; 2fip doesn't follow them.
-- Folders it isn't allowed to read are left out.
+- Folders it isn't allowed to read are left out (and counted).
 - Text and rows follow **Settings → File name size**.
 - For a quick total without the analysis, select folders and press
   <kbd>Space</kbd>: their size appears in the Size column (see

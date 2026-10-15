@@ -7,7 +7,7 @@ use cosmic::widget::menu::action::MenuAction;
 use cosmic::widget::menu::{self, Item as MenuItem};
 use cosmic::widget::{self, icon};
 use cosmic::Element;
-use fs_ops::folder_size::Entry;
+use fs_ops::folder_size::{DriveSpace, Entry, Scan, ScanProgress};
 
 use crate::app::{Message, PaneId};
 use crate::file_item::{format_size, ListingOptions};
@@ -20,6 +20,16 @@ pub struct Panel {
     pub root: PathBuf,
     tree: Option<Entry>,
     loading: bool,
+    /// The running scan (to follow and stop it), and which one it is, so a
+    /// late result of a replaced scan is ignored.
+    scan: Option<std::sync::Arc<ScanProgress>>,
+    generation: u64,
+    /// Files and folders counted, and their size, while scanning.
+    counted: (u64, u64),
+    /// What the scan found besides the tree.
+    unreadable: u64,
+    drive: Option<DriveSpace>,
+    is_drive_root: bool,
     error: Option<String>,
     expanded: HashSet<PathBuf>,
     focused: PathBuf,
@@ -64,6 +74,15 @@ const COLOR_STEPS: [(f32, f32, f32); 10] = [
     (0.12, 0.66, 0.52),
 ];
 
+impl Drop for Panel {
+    /// Closing the panel stops its scan.
+    fn drop(&mut self) {
+        if let Some(scan) = &self.scan {
+            scan.cancel();
+        }
+    }
+}
+
 impl Panel {
     pub fn loading(target: PaneId, root: PathBuf, options: ListingOptions) -> Self {
         Self {
@@ -73,6 +92,12 @@ impl Panel {
             root,
             tree: None,
             loading: true,
+            scan: None,
+            generation: 0,
+            counted: (0, 0),
+            unreadable: 0,
+            drive: None,
+            is_drive_root: false,
             error: None,
             context_path: None,
             hovered: None,
@@ -85,23 +110,47 @@ impl Panel {
         self.options = options;
     }
 
-    pub fn set_result(&mut self, result: Result<Entry, String>) {
-        self.loading = false;
+    /// Starts following a new scan (stopping the previous one): its
+    /// generation, and the progress it will report to.
+    pub fn start_scan(&mut self) -> (u64, std::sync::Arc<ScanProgress>) {
+        if let Some(previous) = self.scan.take() {
+            previous.cancel();
+        }
+        let progress = std::sync::Arc::new(ScanProgress::new());
+        self.scan = Some(progress.clone());
+        self.generation += 1;
+        self.loading = true;
         self.error = None;
-        match result {
-            Ok(tree) => {
-                if find_entry(&tree, &self.focused).is_none() {
-                    self.focused = tree.path.clone();
-                }
-                self.tree = Some(tree);
-            }
-            Err(error) => self.error = Some(error),
+        self.counted = (0, 0);
+        (self.generation, progress)
+    }
+
+    /// Progress of scan `generation`.
+    pub fn set_progress(&mut self, generation: u64, entries: u64, bytes: u64) {
+        if generation == self.generation && self.loading {
+            self.counted = (entries, bytes);
         }
     }
 
-    pub fn start_refresh(&mut self) {
-        self.loading = true;
+    pub fn set_result(&mut self, generation: u64, result: Result<Scan, String>) {
+        if generation != self.generation {
+            return;
+        }
+        self.loading = false;
+        self.scan = None;
         self.error = None;
+        match result {
+            Ok(scan) => {
+                if find_entry(&scan.tree, &self.focused).is_none() {
+                    self.focused = scan.tree.path.clone();
+                }
+                self.unreadable = scan.unreadable;
+                self.drive = scan.drive;
+                self.is_drive_root = scan.is_drive_root;
+                self.tree = Some(scan.tree);
+            }
+            Err(error) => self.error = Some(error),
+        }
     }
 
     pub fn toggle(&mut self, path: PathBuf) {
@@ -162,7 +211,7 @@ impl Panel {
             ));
 
         let content: Element<'_, Message> = if self.loading {
-            widget::text::body(fl!("folder-size-loading")).into()
+            self.progress_view()
         } else if let Some(error) = &self.error {
             widget::text::body(error.clone()).into()
         } else if let Some(tree) = &self.tree {
@@ -174,11 +223,63 @@ impl Panel {
         widget::Column::new()
             .spacing(8)
             .push(header)
+            .push_maybe(self.drive_summary())
             .push(widget::divider::horizontal::default())
             .push(content)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+
+    /// While scanning: what has been counted so far, and a Cancel button.
+    fn progress_view(&self) -> Element<'_, Message> {
+        let (entries, bytes) = self.counted;
+        widget::Column::new()
+            .spacing(12)
+            .push(widget::text::body(fl!("folder-size-loading")))
+            .push(widget::text::caption(fl!(
+                "folder-size-scanning",
+                count = entries,
+                size = format_size(bytes)
+            )))
+            .push(widget::button::standard(fl!("cancel")).on_press(Message::FolderSizeClose))
+            .into()
+    }
+
+    /// The drive's bar (used, total, free) and what the scan couldn't count.
+    fn drive_summary(&self) -> Option<Element<'_, Message>> {
+        let drive = self.drive.filter(|drive| drive.total > 0)?;
+        let mut summary = widget::Column::new()
+            .spacing(4)
+            .push(widget::text::caption(fl!(
+                "folder-size-drive",
+                used = format_size(drive.used),
+                total = format_size(drive.total),
+                free = format_size(drive.available)
+            )))
+            .push(
+                cosmic::iced::widget::progress_bar(0.0..=drive.total as f32, drive.used as f32)
+                    .girth(Length::Fixed(8.0)),
+            );
+        if !self.loading {
+            // At the top of a drive, what the drive uses beyond what was
+            // counted: system folders 2fip can't see, file system data.
+            let counted = self.tree.as_ref().map_or(0, |tree| tree.size);
+            let other = drive.used.saturating_sub(counted);
+            if self.is_drive_root && other > 0 {
+                summary = summary.push(widget::text::caption(fl!(
+                    "folder-size-other",
+                    size = format_size(other)
+                )));
+            }
+            if self.unreadable > 0 {
+                summary = summary.push(widget::text::caption(fl!(
+                    "folder-size-unreadable",
+                    count = self.unreadable
+                )));
+            }
+        }
+        Some(summary.into())
     }
 
     fn split_view(&self, tree: &Entry) -> Element<'_, Message> {
@@ -593,7 +694,19 @@ fn find_entry<'a>(entry: &'a Entry, path: &Path) -> Option<&'a Entry> {
 
 /// The folder that directly contains `path` (same quick descent).
 fn find_parent_entry<'a>(entry: &'a Entry, path: &Path) -> Option<&'a Entry> {
-    find_entry(entry, path.parent()?).filter(|found| found.is_dir)
+    // Walks down rather than looking up `path.parent()`: in the Flatpak, the
+    // drive's `usr` folder is `/run/host/usr`, directly under `/`.
+    let mut parent = entry;
+    loop {
+        let child = parent
+            .children
+            .iter()
+            .find(|child| path.starts_with(&child.path))?;
+        if child.path == path {
+            return Some(parent);
+        }
+        parent = child;
+    }
 }
 
 #[derive(Clone)]
@@ -1007,7 +1120,15 @@ mod tests {
                 separate_extension: true,
             },
         );
-        panel.set_result(Ok(tree));
+        panel.set_result(
+            0,
+            Ok(Scan {
+                tree,
+                unreadable: 0,
+                drive: None,
+                is_drive_root: false,
+            }),
+        );
 
         panel.select(child_path.clone());
         assert_eq!(panel.focused, child_path);

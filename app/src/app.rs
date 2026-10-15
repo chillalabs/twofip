@@ -108,7 +108,10 @@ pub enum Message {
     ExternalDrop(Vec<PathBuf>),
     DetailsLoaded(Vec<PathBuf>, Result<Details, String>),
     CloseDetails,
-    FolderSizeLoaded(PaneId, PathBuf, Result<fs_ops::folder_size::Entry, String>),
+    /// A scan finished (panel, scan generation, result).
+    FolderSizeLoaded(PaneId, u64, Result<fs_ops::folder_size::Scan, String>),
+    /// A scan's progress: entries and bytes counted so far.
+    FolderSizeProgress(PaneId, u64, u64, u64),
     FolderSizeToggle(PaneId, PathBuf),
     FolderSizeSelect(PaneId, PathBuf),
     FolderSizeHover(PaneId, Option<(PathBuf, String, String)>),
@@ -537,13 +540,23 @@ impl App {
                 self.pane_mut(id).update(msg)
             }
             Message::Action(action) => self.handle_action(action),
-            Message::FolderSizeLoaded(target, root, result) => {
+            Message::FolderSizeLoaded(target, generation, result) => {
                 if let Some(panel) = self
                     .folder_size
                     .as_mut()
-                    .filter(|panel| panel.target == target && panel.root == root)
+                    .filter(|panel| panel.target == target)
                 {
-                    panel.set_result(result);
+                    panel.set_result(generation, result);
+                }
+                Task::none()
+            }
+            Message::FolderSizeProgress(target, generation, entries, bytes) => {
+                if let Some(panel) = self
+                    .folder_size
+                    .as_mut()
+                    .filter(|panel| panel.target == target)
+                {
+                    panel.set_progress(generation, entries, bytes);
                 }
                 Task::none()
             }
@@ -2626,42 +2639,67 @@ impl App {
             self.folder_size = None;
             return Task::none();
         }
-        let Some(root) = self.pane(self.active_pane).selected_single_dir() else {
+        // The selected folder, or (nothing selected) the folder the panel
+        // shows: e.g. `/` or `C:\` for a whole drive.
+        let Some(root) = self.folder_size_root() else {
             return Task::none();
         };
-        if fs_ops::vfs::is_remote(&root) {
-            return Task::none();
-        }
-
         let target = self.active_pane.other();
         self.folder_size = Some(FolderSizePanel::loading(
             target,
-            root.clone(),
+            root,
             self.listing_options(),
         ));
-        let scan_root = root.clone();
-        cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || fs_ops::folder_size::scan(&scan_root))
-                .await
-                .unwrap_or_else(|err| Err(format!("folder size task failed: {err}")));
-            Message::FolderSizeLoaded(target, root, result)
-        })
+        self.refresh_folder_size()
     }
 
+    /// What Folder Size would analyze: the single selected folder, else the
+    /// active panel's folder; never a server folder.
+    fn folder_size_root(&self) -> Option<PathBuf> {
+        let pane = self.pane(self.active_pane);
+        let root = pane
+            .selected_single_dir()
+            .or_else(|| pane.selected_paths().is_empty().then(|| pane.current_dir()))?;
+        (!fs_ops::vfs::is_remote(&root)).then_some(root)
+    }
+
+    /// (Re)scans the Folder Size panel's folder, reporting progress a few
+    /// times a second until the result comes.
     fn refresh_folder_size(&mut self) -> Task<Message> {
         let Some(panel) = self.folder_size.as_mut() else {
             return Task::none();
         };
-        panel.start_refresh();
+        let (generation, progress) = panel.start_scan();
         let target = panel.target;
         let root = panel.root.clone();
-        let scan_root = root.clone();
-        cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || fs_ops::folder_size::scan(&scan_root))
-                .await
-                .unwrap_or_else(|err| Err(format!("folder size task failed: {err}")));
-            Message::FolderSizeLoaded(target, root, result)
-        })
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        tokio::spawn(async move {
+            let scan_progress = progress.clone();
+            let mut job = tokio::task::spawn_blocking(move || {
+                fs_ops::folder_size::scan(&root, &scan_progress)
+            });
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
+            loop {
+                tokio::select! {
+                    result = &mut job => {
+                        let result = result
+                            .unwrap_or_else(|err| Err(format!("folder size task failed: {err}")));
+                        let _ = tx.send(Message::FolderSizeLoaded(target, generation, result)).await;
+                        break;
+                    }
+                    _ = tick.tick() => {
+                        let (entries, bytes) = progress.counted();
+                        let progress_message =
+                            Message::FolderSizeProgress(target, generation, entries, bytes);
+                        if tx.send(progress_message).await.is_err() {
+                            progress.cancel();
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        cosmic::task::stream(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
 
     /// Copies (or, after a Cut, moves) the clipboard's paths into the active
@@ -2970,10 +3008,7 @@ impl Application for App {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Message>> {
-        let selected_folder = self.pane(self.active_pane).selected_single_dir();
-        let can_folder_size = selected_folder
-            .as_ref()
-            .is_some_and(|path| !fs_ops::vfs::is_remote(path));
+        let can_folder_size = self.folder_size_root().is_some();
         menu_bar(
             &self.keybinds,
             self.clipboard.is_some(),

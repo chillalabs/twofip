@@ -2187,6 +2187,7 @@ dependencies = [
 name = "fs-ops"
 version = "0.2.7"
 dependencies = [
+ "libc",
  "md5",
  "mime_guess",
  "oo7",
