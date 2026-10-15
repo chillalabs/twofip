@@ -65,6 +65,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.5" date="2026-10-15">
+      <description>
+        <p>Smaller text, a Windows theme and a faster Folder Size:</p>
+        <ul>
+          <li>File name size goes from Medium (14 px) down to Tiny (10 px); rows and icons shrink with the text, also in the Folder Size panel</li>
+          <li>Windows is now a color theme instead of a separate checkbox</li>
+          <li>Folder icons line up with the text</li>
+          <li>Folder Size scans folders on all CPU cores, no longer freezes while the mouse moves over the chart, and shows the 500 largest entries per folder</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.4" date="2026-10-13">
       <description>
         <p>Fix the automatic refresh:</p>
