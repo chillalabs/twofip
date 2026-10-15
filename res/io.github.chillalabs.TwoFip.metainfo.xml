@@ -65,6 +65,14 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.7" date="2026-10-15">
+      <description>
+        <p>A Total Commander shortcut:</p>
+        <ul>
+          <li>Shift+F6 renames the selected file or folder, like F2</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.6" date="2026-10-15">
       <description>
         <p>Search results as a list:</p>
