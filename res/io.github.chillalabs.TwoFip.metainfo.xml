@@ -65,6 +65,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.6" date="2026-10-15">
+      <description>
+        <p>Search results as a list:</p>
+        <ul>
+          <li>View in Listbox, in Find Files, shows all results as a tab in the active panel, where they can be opened, viewed, copied, moved, renamed or deleted like files in a folder</li>
+          <li>Nothing can be copied, moved, pasted or dropped into such a results tab</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.5" date="2026-10-15">
       <description>
         <p>Smaller text, a Windows theme and a faster Folder Size:</p>
