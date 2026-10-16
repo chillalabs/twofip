@@ -11,6 +11,7 @@ mod icon_sets;
 mod keybinds;
 mod launch;
 mod localize;
+mod marquee;
 mod menu_bar;
 mod operation;
 mod pane;

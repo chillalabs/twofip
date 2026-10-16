@@ -269,6 +269,11 @@ pub fn tooltip_style(theme: &cosmic::Theme) -> widget::container::Style {
     }
 }
 
+/// Black or white text, whichever reads better on `background`.
+pub fn text_on(background: Color) -> Color {
+    contrasting_text(background.r, background.g, background.b)
+}
+
 /// Near-white text on a dark background, near-black on a light one
 /// (by the background's relative luminance; channels are sRGB, 0–1).
 fn contrasting_text(red: f32, green: f32, blue: f32) -> Color {

@@ -211,6 +211,23 @@ impl TabState {
 
     /// Selects only `entity`, clearing any other selection; it becomes both
     /// the anchor and the cursor.
+    /// Rubber-band selection: exactly `base` plus the entries at positions
+    /// `hits` (in list order) end up selected.
+    pub fn select_base_and(&mut self, base: &HashSet<table::Entity>, hits: &[usize]) {
+        let order: Vec<table::Entity> = self.entries.iter().collect();
+        let hit: HashSet<table::Entity> = hits
+            .iter()
+            .filter_map(|index| order.get(*index).copied())
+            .collect();
+        for entity in &order {
+            self.set_selected(*entity, base.contains(entity) || hit.contains(entity));
+        }
+        if let Some(last) = hits.last().and_then(|index| order.get(*index)) {
+            self.anchor = self.path_of(*last);
+            self.cursor = self.anchor.clone();
+        }
+    }
+
     pub fn select_only(&mut self, entity: table::Entity) {
         let currently_selected: Vec<_> = self.entries.active().collect();
         for other in currently_selected {

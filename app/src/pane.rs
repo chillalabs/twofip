@@ -100,6 +100,8 @@ pub enum PaneMessage {
     /// While resizing: the mouse is at this window x position.
     ColumnResizeMoved(f32),
     ColumnResizeEnded,
+    /// Rubber-band selection in the list or grid.
+    Marquee(crate::marquee::Change),
     /// A content preview finished loading (`None`: none could be made).
     ThumbnailReady(ThumbnailKey, Option<PathBuf>),
     SelectAll,
@@ -168,6 +170,9 @@ pub struct PaneState {
     /// folder, or the tab's own folder); that place is highlighted.
     /// The list column divider being dragged, if any.
     column_resize: Option<ColumnResize>,
+    /// What stays selected during a rubber-band drag (Ctrl: the previous
+    /// selection; otherwise nothing).
+    marquee_base: HashSet<table::Entity>,
     drop_hover: Option<PathBuf>,
 }
 
@@ -212,6 +217,7 @@ impl PaneState {
             thumbnails_requested: HashSet::new(),
             drop_hover: None,
             column_resize: None,
+            marquee_base: HashSet::new(),
         };
         (pane, Task::batch(tasks))
     }
@@ -394,6 +400,25 @@ impl PaneState {
                     let widths = resized(resize.start, columns, resize.divider, x - start_x);
                     if let Some(tab_state) = self.tabs.active_data_mut::<TabState>() {
                         tab_state.column_widths = widths;
+                    }
+                }
+                Task::none()
+            }
+            PaneMessage::Marquee(change) => {
+                let Some(tab_state) = self.tabs.active_data_mut::<TabState>() else {
+                    return Task::none();
+                };
+                match change {
+                    crate::marquee::Change::Started { additive } => {
+                        self.marquee_base = if additive {
+                            tab_state.entries.active().collect()
+                        } else {
+                            HashSet::new()
+                        };
+                        tab_state.select_base_and(&self.marquee_base, &[]);
+                    }
+                    crate::marquee::Change::Selected(hits) => {
+                        tab_state.select_base_and(&self.marquee_base, &hits);
                     }
                 }
                 Task::none()
@@ -1136,18 +1161,30 @@ impl PaneState {
                                 widget::Column::new()
                                     .push(list_header(t, widths, separate_extension))
                                     .push(widget::divider::horizontal::default())
-                                    .push(
-                                        widget::scrollable(list_view(
-                                            self,
-                                            t,
-                                            widths,
-                                            select_mode,
-                                            &keybinds,
-                                            can_paste,
-                                        ))
-                                        .id(scroll_id.clone())
-                                        .height(Length::Fill),
-                                    )
+                                    .push({
+                                        // The scroll area's own size, so the
+                                        // rubber band covers its empty space.
+                                        let keybinds = keybinds.clone();
+                                        let scroll_id = scroll_id.clone();
+                                        widget::responsive(move |area| {
+                                            widget::scrollable(crate::marquee::marquee(
+                                                list_view(
+                                                    self,
+                                                    t,
+                                                    widths,
+                                                    select_mode,
+                                                    &keybinds,
+                                                    can_paste,
+                                                ),
+                                                1,
+                                                scroll_content_height(area.height),
+                                                PaneMessage::Marquee,
+                                            ))
+                                            .id(scroll_id.clone())
+                                            .height(Length::Fill)
+                                            .into()
+                                        })
+                                    })
                                     .into()
                             })
                             .into()
@@ -1157,13 +1194,18 @@ impl PaneState {
                             let keybinds = keybinds.clone();
                             let scroll_id = self.scroll_id.clone();
                             widget::responsive(move |size| {
-                                widget::scrollable(grid_view(
-                                    self,
-                                    t,
-                                    size.width,
-                                    select_mode,
-                                    &keybinds,
-                                    can_paste,
+                                widget::scrollable(crate::marquee::marquee(
+                                    grid_view(
+                                        self,
+                                        t,
+                                        size.width,
+                                        select_mode,
+                                        &keybinds,
+                                        can_paste,
+                                    ),
+                                    2,
+                                    scroll_content_height(size.height),
+                                    PaneMessage::Marquee,
                                 ))
                                 .id(scroll_id.clone())
                                 .height(Length::Fill)
@@ -1391,6 +1433,12 @@ pub fn row_padding_y(font_size: FontSize) -> u16 {
 const LIST_COLUMN_GAP: u16 = 8;
 /// Horizontal padding inside each row (and its selection highlight).
 const LIST_ROW_PADDING_X: u16 = 8;
+/// The height a scroll area of `height` shows of its content (inside its
+/// padding): content this tall fills it without scrolling.
+fn scroll_content_height(height: f32) -> f32 {
+    (height - 2.0 * f32::from(LIST_SCROLL_PADDING)).max(0.0)
+}
+
 /// Padding libcosmic's `scrollable` adds around its content on every side;
 /// the header (outside the scroll area) adds it itself to line up.
 const LIST_SCROLL_PADDING: u16 = 8;
@@ -1406,12 +1454,15 @@ fn selection_class(selected: bool, drop_hover: bool) -> cosmic::theme::Container
             return widget::container::Style::default();
         }
         let cosmic = theme.cosmic();
+        let accent: cosmic::iced::Color = cosmic.accent_color().into();
+        // Black or white by the accent's brightness: libcosmic's
+        // "on accent" color is unreadable on some accents (Monokai Pro's
+        // yellow, Matrix's green, Macchiato's mauve, the Dark theme's blue).
+        let text = crate::themes::text_on(accent);
         widget::container::Style {
-            icon_color: Some(cosmic.on_accent_color().into()),
-            text_color: Some(cosmic.on_accent_color().into()),
-            background: Some(cosmic::iced::Background::Color(
-                cosmic.accent_color().into(),
-            )),
+            icon_color: Some(text),
+            text_color: Some(text),
+            background: Some(cosmic::iced::Background::Color(accent)),
             border: cosmic::iced::Border {
                 radius: cosmic.radius_s().into(),
                 ..Default::default()
@@ -1419,6 +1470,20 @@ fn selection_class(selected: bool, drop_hover: bool) -> cosmic::theme::Container
             ..Default::default()
         }
     })
+}
+
+/// A selected entry's text: black or white, whichever reads better on the
+/// accent-colored selection. (The text doesn't take the color from the
+/// selection's container, so it's set here.)
+fn selected_text(
+    text: widget::Text<'static, cosmic::Theme>,
+    selected: bool,
+) -> widget::Text<'static, cosmic::Theme> {
+    if !selected {
+        return text;
+    }
+    let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent_color().into();
+    text.class(cosmic::theme::Text::Color(crate::themes::text_on(accent)))
 }
 
 /// One line of text, cut with "…" when it doesn't fit its column.
@@ -1623,7 +1688,10 @@ fn list_view<'a>(
                 (Column::Name, _) if pane.options.separate_extension => item.stem().to_string(),
                 _ => item.get_text(column).into_owned(),
             };
-            let text = one_line(text, pane.options.font_size);
+            let text = selected_text(
+                one_line(text, pane.options.font_size),
+                tab_state.entries.is_active(entity),
+            );
             let cell: Element<'a, PaneMessage> = if column == Column::Name {
                 widget::Row::new()
                     .spacing(8)
@@ -1701,11 +1769,14 @@ fn grid_view<'a>(
                 // Up to 3 lines, like COSMIC Files; long words break too
                 // (with plain word wrapping a name without spaces spilled
                 // over its neighbors), and "…" ends anything longer.
-                name_text(item.name().to_string(), pane.options.font_size)
-                    .width(Length::Fill)
-                    .align_x(cosmic::iced::alignment::Horizontal::Center)
-                    .wrapping(Wrapping::WordOrGlyph)
-                    .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(3))),
+                selected_text(
+                    name_text(item.name().to_string(), pane.options.font_size),
+                    selected,
+                )
+                .width(Length::Fill)
+                .align_x(cosmic::iced::alignment::Horizontal::Center)
+                .wrapping(Wrapping::WordOrGlyph)
+                .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(3))),
             );
         let cell = widget::container(content)
             .padding(6)
