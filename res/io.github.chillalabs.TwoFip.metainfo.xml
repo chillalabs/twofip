@@ -65,6 +65,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.9" date="2026-10-15">
+      <description>
+        <p>Rubber-band selection and readable selections:</p>
+        <ul>
+          <li>Drag a rectangle from empty space in the list or grid to select files and folders; Ctrl adds to the selection</li>
+          <li>A click on empty space clears the selection</li>
+          <li>Selected files' text stays readable with light accent colors, such as Monokai Pro, Matrix and Catppuccin Macchiato</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.8" date="2026-10-15">
       <description>
         <p>Folder Size for a whole drive:</p>
