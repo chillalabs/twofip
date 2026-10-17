@@ -11,9 +11,13 @@ title: Working with files
 | Add or remove one | <kbd>Ctrl</kbd>+click | — |
 | A range | <kbd>Shift</kbd>+click | <kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> / <kbd>Home</kbd> / <kbd>End</kbd> |
 | Everything | — | <kbd>Ctrl</kbd>+<kbd>A</kbd> |
+| Several at once | Drag a rectangle from **empty space** (<kbd>Ctrl</kbd>: add to the selection) | — |
+
+A click on empty space clears the selection.
 
 Right-click an item for its menu: Open, Open with…, View, Edit, Calculate
-size, Cut, Copy, Paste, Rename…, Compress…, Delete and Show details.
+size, Cut, Copy, Paste, Rename…, Pack…, Extract… (archives), Delete and Show
+details.
 
 ## Opening
 
@@ -22,6 +26,8 @@ size, Cut, Copy, Paste, Rename…, Compress…, Delete and Show details.
   from.
 - **Files:** double-click or <kbd>Enter</kbd> opens a file with its default
   app.
+- **Archives** (zip, tar, tgz, txz, 7z): double-click or <kbd>Enter</kbd>
+  opens them **like a folder** (see [Archives](#archives)).
 - **<kbd>F3</kbd> View** opens the file's default app (images: the image
   viewer).
 - **<kbd>F4</kbd> Edit** always opens the text editor (images: the image
@@ -40,7 +46,8 @@ size, Cut, Copy, Paste, Rename…, Compress…, Delete and Show details.
   apps. Dropping copies; hold <kbd>Shift</kbd> to move.
 
 Operations run in the background, with a progress panel and **Cancel**. If a
-file already exists, 2fip asks: **Replace**, **Skip**, or the same for all.
+file already exists, 2fip asks: **Replace**, **Skip**, the same for all,
+**Rename** (keep both), or **Cancel** (stop the whole operation).
 
 ## Renaming and new folders
 
@@ -59,6 +66,57 @@ file already exists, 2fip asks: **Replace**, **Skip**, or the same for all.
 
 In the question, <kbd>←</kbd> / <kbd>→</kbd> or <kbd>Tab</kbd> choose the
 button and <kbd>Enter</kbd> confirms; <kbd>Esc</kbd> cancels.
+
+## Archives
+
+### Pack files
+
+Select files and folders, then:
+
+- **Right-click → Pack…** creates the archive **in the same folder**;
+- the **Pack files** button or <kbd>Alt</kbd>+<kbd>F5</kbd> creates it **in
+  the other panel's folder**.
+
+In the window you choose:
+
+- **Archive (folder and name):** where the archive goes; you can type another
+  folder or name.
+- **Format:** zip, tar, gz, tgz, xz, txz or 7z. gz and xz pack a **single
+  file**; use tgz or txz for folders or several files.
+- **Password:** for zip and 7z, encrypts the archive (AES-256).
+- **Move to archive:** deletes the originals once the archive is complete.
+
+### Extract files
+
+Select one or more archives, then:
+
+- **Right-click → Extract…** unpacks them **in the same folder** as the
+  archive;
+- the **Extract files** button or <kbd>Alt</kbd>+<kbd>F9</kbd> unpacks them
+  **into the other panel's folder**.
+
+Options: **Unpack path names if stored with files** (on: recreates the
+archive's folders; off: everything goes straight into one folder),
+**Overwrite existing files** (off: 2fip asks for each one), and a
+**Password** for encrypted archives.
+
+### Inside an archive
+
+Double-click an archive (or press <kbd>Enter</kbd>) to open it **like a
+folder**, with all its folders and files. From there:
+
+- <kbd>F5</kbd> copies (and drag and drop copies) files and folders out, to
+  the other panel;
+- <kbd>F6</kbd> moves them out: they are removed from the archive;
+- <kbd>F8</kbd> deletes them from the archive;
+- <kbd>Enter</kbd>, <kbd>F3</kbd> and <kbd>F4</kbd> open a file (2fip
+  extracts it to its cache first).
+
+An archive opened this way is read-only otherwise: nothing can be pasted or
+dropped into it, and renaming or creating folders there isn't possible.
+Moving or deleting inside a big archive takes a while, because the whole
+archive is written again. Encrypted 7z archives with hidden file names can
+only be extracted (with their password).
 
 ## More
 

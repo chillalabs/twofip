@@ -34,7 +34,14 @@ desktop, inspired by Total Commander and COSMIC Files. Written in Rust with
   same on any distribution and in the Flatpak/AppImage. SFTP logs in with your
   SSH agent or `~/.ssh` keys (or a password) and checks `~/.ssh/known_hosts`.
 - **Find files** (Ctrl+F) by name or pattern (`*.pdf`) in the active folder and
-  its subfolders; jump to a result with Enter or a double-click.
+  its subfolders; jump to a result with Enter or a double-click, or show all
+  results as a tab ("View in Listbox") to copy, move or delete them.
+- **Archives:** pack into zip, tar, gz, tgz, xz, txz or 7z (zip and 7z with a
+  password), extract, and open archives like folders to copy or move files
+  out. Pure Rust, no external tools.
+- **Drives:** a drive menu per panel with USB sticks and other disks (mount and
+  eject), and a **folder tree** beside either panel.
+- **Folder Size:** see what fills a folder or a whole drive, with a ring chart.
 
 ## Keyboard
 
@@ -61,6 +68,7 @@ desktop, inspired by Total Commander and COSMIC Files. Written in Rust with
 | Ctrl+R | Refresh both panels |
 | Ctrl+F | Find files in the active folder and its subfolders |
 | Ctrl+K | Connect to a server (SFTP, FTP, FTPS) |
+| Alt+F5 / Alt+F9 | Pack into / extract from an archive |
 | F1 | Help (the online user's guide) |
 | Alt+Enter | File details |
 | Ctrl+, | Settings |

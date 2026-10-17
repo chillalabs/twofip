@@ -1,3 +1,4 @@
+pub mod archive_fs;
 pub mod connections;
 pub mod details;
 pub mod drives;

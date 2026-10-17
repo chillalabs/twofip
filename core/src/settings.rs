@@ -16,6 +16,8 @@ pub struct Settings {
     pub icon_style: IconStyle,
     /// Show previews of images, PDFs, videos, ... instead of type icons.
     pub show_thumbnails: bool,
+    /// List view: a thin line between rows, like COSMIC Files.
+    pub row_lines: bool,
     /// Text size of file and folder names in the listings.
     pub name_font_size: FontSize,
     /// List view: show the extension in its own "Ext" column (like Total
@@ -25,6 +27,40 @@ pub struct Settings {
     pub color_theme: ColorTheme,
     /// How rounded the window, buttons, menus and panels are.
     pub corners: Corners,
+    /// Which panels show the folder tree beside their files.
+    pub folder_tree: TreeMode,
+}
+
+/// Which panels show the folder tree ("Show hierarchy"); the toolbar button
+/// goes through them in this order.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TreeMode {
+    #[default]
+    Off,
+    Left,
+    Right,
+    Both,
+}
+
+impl TreeMode {
+    /// The next one: off → left → right → both → off.
+    pub fn next(self) -> Self {
+        match self {
+            TreeMode::Off => TreeMode::Left,
+            TreeMode::Left => TreeMode::Right,
+            TreeMode::Right => TreeMode::Both,
+            TreeMode::Both => TreeMode::Off,
+        }
+    }
+
+    pub fn left(self) -> bool {
+        matches!(self, TreeMode::Left | TreeMode::Both)
+    }
+
+    pub fn right(self) -> bool {
+        matches!(self, TreeMode::Right | TreeMode::Both)
+    }
 }
 
 /// Roundness of the window, buttons, menus and panels, from square corners
@@ -162,10 +198,12 @@ impl Default for Settings {
             language: "system".to_string(),
             icon_style: IconStyle::default(),
             show_thumbnails: true,
+            row_lines: false,
             name_font_size: FontSize::default(),
             separate_extension: true,
             color_theme: ColorTheme::default(),
             corners: Corners::default(),
+            folder_tree: TreeMode::default(),
         }
     }
 }
@@ -280,10 +318,12 @@ mod tests {
             language: "en".to_string(),
             icon_style: IconStyle::Monochrome,
             show_thumbnails: false,
+            row_lines: true,
             name_font_size: FontSize::Smaller,
             separate_extension: false,
             color_theme: ColorTheme::Dracula,
             corners: Corners::Small,
+            folder_tree: TreeMode::Both,
         };
 
         save_to(&path, &settings).unwrap();

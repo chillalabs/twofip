@@ -7,6 +7,7 @@ mod dnd;
 mod file_item;
 mod find;
 mod folder_size;
+mod folder_tree;
 mod icon_sets;
 mod keybinds;
 mod launch;

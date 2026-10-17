@@ -497,6 +497,7 @@ mod tests {
             icon_style: IconStyle::Colorful,
             user_dirs: Arc::new(HashMap::new()),
             show_thumbnails: false,
+            row_lines: false,
             font_size: fs_ops::settings::FontSize::Medium,
             separate_extension: true,
         }
@@ -595,6 +596,7 @@ mod tests {
             icon_style: IconStyle::Colorful,
             user_dirs: Arc::new(HashMap::new()),
             show_thumbnails: false,
+            row_lines: false,
             font_size: fs_ops::settings::FontSize::Medium,
             separate_extension: true,
         };
@@ -682,6 +684,7 @@ mod tests {
             icon_style: IconStyle::Colorful,
             user_dirs: Arc::new(HashMap::new()),
             show_thumbnails: false,
+            row_lines: false,
             font_size: fs_ops::settings::FontSize::Medium,
             separate_extension: true,
         });

@@ -63,8 +63,18 @@ pub fn item_menu(
         button(
             fl!("compress-ellipsis"),
             "package-x-generic-symbolic",
-            Action::Compress,
+            Action::CompressHere,
         ),
+    ]);
+    // Archives can be unpacked too.
+    if fs_ops::ops::ArchiveFormat::of(&item.path).is_some() && !item.is_dir() {
+        items.push(button(
+            fl!("extract-ellipsis"),
+            "package-x-generic-symbolic",
+            Action::ExtractHere,
+        ));
+    }
+    items.extend([
         MenuItem::Divider,
         button(fl!("delete"), "user-trash-symbolic", Action::Delete),
         MenuItem::Divider,

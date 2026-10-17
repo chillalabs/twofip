@@ -6,6 +6,7 @@
 //! mid-operation. Cancellation is checked between files, not mid-file, so
 //! cancelling while copying one very large file lets that file finish first.
 
+mod archive;
 mod compress;
 mod conflict;
 mod copy;
@@ -20,6 +21,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+pub use archive::{
+    copy_out, delete_in_archive, extract_to_cache, pack, unpack, ArchiveFormat, PackOptions,
+    UnpackOptions,
+};
 pub use compress::compress_zip;
 pub use conflict::{ConflictHandle, ConflictResolution};
 pub use copy::copy;

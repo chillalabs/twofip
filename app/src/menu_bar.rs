@@ -36,6 +36,7 @@ pub fn menu_bar<'a>(
     view_mode: ViewMode,
     on_server: bool,
     can_folder_size: bool,
+    folder_tree: fs_ops::settings::TreeMode,
 ) -> Vec<Element<'a, Message>> {
     // Same shortcuts, re-keyed to the wrapper so the menu can show them.
     let keybinds: HashMap<KeyBind, TopMenuAction> = keybinds
@@ -204,5 +205,58 @@ pub fn menu_bar<'a>(
         )
         .into(),
         folder_size.into(),
+        svg_tool(
+            include_bytes!("../resources/icons/pack.svg"),
+            fl!("tooltip-pack"),
+            Action::Compress,
+        ),
+        svg_tool(
+            include_bytes!("../resources/icons/unpack.svg"),
+            fl!("tooltip-unpack"),
+            Action::Extract,
+        ),
+        tree_button(folder_tree),
     ]
+}
+
+/// "Show hierarchy": its icon shows which panels have the folder tree, and
+/// each click moves on (left, right, both, none).
+fn tree_button<'a>(mode: fs_ops::settings::TreeMode) -> Element<'a, Message> {
+    use fs_ops::settings::TreeMode;
+    let (svg, tooltip): (&'static [u8], String) = match mode {
+        TreeMode::Off => (
+            include_bytes!("../resources/icons/tree-off.svg"),
+            fl!("tooltip-tree-off"),
+        ),
+        TreeMode::Left => (
+            include_bytes!("../resources/icons/tree-left.svg"),
+            fl!("tooltip-tree-left"),
+        ),
+        TreeMode::Right => (
+            include_bytes!("../resources/icons/tree-right.svg"),
+            fl!("tooltip-tree-right"),
+        ),
+        TreeMode::Both => (
+            include_bytes!("../resources/icons/tree-both.svg"),
+            fl!("tooltip-tree-both"),
+        ),
+    };
+    themes::tooltip(
+        widget::button::custom(icon::from_svg_bytes(svg).symbolic(true).icon().size(18))
+            .on_press(Message::Action(Action::FolderTree)),
+        widget::text(tooltip),
+        widget::tooltip::Position::Bottom,
+    )
+    .into()
+}
+
+/// A toolbar button with one of 2fip's own icons (drawn in the text color).
+fn svg_tool<'a>(svg: &'static [u8], tooltip: String, action: Action) -> Element<'a, Message> {
+    themes::tooltip(
+        widget::button::custom(icon::from_svg_bytes(svg).symbolic(true).icon().size(18))
+            .on_press(Message::Action(action)),
+        widget::text(tooltip),
+        widget::tooltip::Position::Bottom,
+    )
+    .into()
 }

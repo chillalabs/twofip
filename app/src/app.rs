@@ -92,14 +92,36 @@ pub enum Message {
     /// Moves a favorite one place up (`true`) or down in the list.
     MoveFavorite(usize, bool),
     GoToFavorite(usize),
-    CompressNameChanged(String),
-    ConfirmCompress,
-    CancelCompress,
+    /// Pack dialog: the archive's path, format, password and
+    /// "Move to archive".
+    PackPathChanged(String),
+    PackFormatSelected(usize),
+    PackPasswordChanged(String),
+    PackTogglePassword,
+    PackMoveToggled(bool),
+    ConfirmPack,
+    CancelPack,
+    /// Extract dialog.
+    UnpackKeepPathsToggled(bool),
+    UnpackOverwriteToggled(bool),
+    UnpackPasswordChanged(String),
+    UnpackTogglePassword,
+    ConfirmUnpack,
+    CancelUnpack,
+    /// Cancel in the "file already exists" dialog: stops the operation.
+    CancelConflict,
     /// Apps available for the paths the "Open With" dialog was opened for.
     OpenWithLoaded(Vec<PathBuf>, Vec<AppEntry>),
     LaunchApp(usize),
     CancelOpenWith,
     Launched,
+    /// Time to read the drive list again.
+    RefreshDrives,
+    DrivesLoaded(Vec<fs_ops::drives::Drive>),
+    /// A drive picked in a panel's menu got mounted (or not).
+    DriveMounted(PaneId, Result<PathBuf, String>),
+    /// A drive was ejected (or not).
+    DriveEjected(PaneId, Result<(), String>),
     /// A column resize event for whichever pane is resizing.
     ColumnResize(PaneMessage),
     /// Files dropped from another app through the window system (Explorer
@@ -121,6 +143,7 @@ pub enum Message {
     FolderSizeClose,
     ShowHiddenFilesToggled(bool),
     ThumbnailsToggled(bool),
+    RowLinesToggled(bool),
     SeparateExtensionToggled(bool),
     /// Index into [`localize::LANGUAGES`]; applied immediately.
     LanguageSelected(usize),
@@ -265,9 +288,10 @@ pub enum SettingsRow {
     Corners,
     IconStyle,
     FontSize,
+    RowLines,
 }
 
-const SETTINGS_ROWS: [SettingsRow; 8] = [
+const SETTINGS_ROWS: [SettingsRow; 9] = [
     SettingsRow::ShowHidden,
     SettingsRow::SeparateExtension,
     SettingsRow::Thumbnails,
@@ -276,6 +300,7 @@ const SETTINGS_ROWS: [SettingsRow; 8] = [
     SettingsRow::Corners,
     SettingsRow::IconStyle,
     SettingsRow::FontSize,
+    SettingsRow::RowLines,
 ];
 
 /// `index` moved by `step` (±1) within `len` options, wrapping around.
@@ -373,10 +398,28 @@ struct Clipboard {
     cut: bool,
 }
 
-struct CompressState {
+/// The Pack dialog.
+struct PackState {
     sources: Vec<PathBuf>,
-    dir: PathBuf,
-    name: String,
+    /// The archive to create: folder and name.
+    path: String,
+    /// Where a bare name (no folder typed) goes: the dialog's default folder.
+    folder: PathBuf,
+    format: fs_ops::ops::ArchiveFormat,
+    password: String,
+    password_hidden: bool,
+    move_files: bool,
+}
+
+/// The Extract dialog.
+struct UnpackState {
+    archives: Vec<PathBuf>,
+    /// Where they go: the other panel's folder.
+    dest: PathBuf,
+    keep_paths: bool,
+    overwrite: bool,
+    password: String,
+    password_hidden: bool,
 }
 
 struct OpenWithState {
@@ -469,10 +512,13 @@ pub struct App {
     /// The Settings row with keyboard focus (index into [`SETTINGS_ROWS`]).
     settings_cursor: usize,
     clipboard: Option<Clipboard>,
-    compress: Option<CompressState>,
+    compress: Option<PackState>,
+    unpack: Option<UnpackState>,
     open_with: Option<OpenWithState>,
     details: Option<DetailsState>,
     folder_size: Option<FolderSizePanel>,
+    /// The drive menus' entries (refreshed every few seconds).
+    drives: Vec<fs_ops::drives::Drive>,
     settings: Settings,
     user_dirs: Arc<HashMap<PathBuf, UserDir>>,
     drawer: Option<DrawerPage>,
@@ -516,10 +562,46 @@ impl App {
                 self.left.clear_drop_hover();
                 self.right.clear_drop_hover();
                 // Nothing goes into search results ("View in Listbox").
-                if self.pane(id).showing_results() {
+                if self.pane(id).read_only() {
                     return Task::none();
                 }
                 self.drop_files(dest, paths, is_move)
+            }
+            Message::Pane(id, PaneMessage::MountDrive(device)) => {
+                self.set_active_pane(id);
+                cosmic::task::future(async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || fs_ops::drives::mount(&device))
+                            .await
+                            .unwrap_or_else(|err| Err(err.to_string()));
+                    Message::DriveMounted(id, result)
+                })
+            }
+            Message::Pane(id, PaneMessage::EjectDrive(drive)) => {
+                self.set_active_pane(id);
+                // Panels showing the drive move home first, or it's busy.
+                let mut tasks = Vec::new();
+                for pane in [PaneId::Left, PaneId::Right] {
+                    let on_drive = drive
+                        .mount
+                        .as_ref()
+                        .is_some_and(|mount| self.pane(pane).current_dir().starts_with(mount));
+                    if on_drive {
+                        tasks.push(
+                            self.pane_mut(pane)
+                                .update(PaneMessage::Navigate(home_dir())),
+                        );
+                    }
+                }
+                let all = self.drives.clone();
+                tasks.push(cosmic::task::future(async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || fs_ops::drives::eject(&drive, &all))
+                            .await
+                            .unwrap_or_else(|err| Err(err.to_string()));
+                    Message::DriveEjected(id, result)
+                }));
+                Task::batch(tasks)
             }
             Message::Pane(id, PaneMessage::ShowShellMenu) => {
                 self.set_active_pane(id);
@@ -532,6 +614,7 @@ impl App {
                 if !matches!(
                     msg,
                     PaneMessage::DirLoaded(..)
+                        | PaneMessage::TreeLoaded(..)
                         | PaneMessage::DropHover(..)
                         | PaneMessage::DropLeave { .. }
                 ) {
@@ -805,7 +888,15 @@ impl App {
                 if self.operation.is_some() {
                     return Task::none();
                 }
-                if self.delete_permanently {
+                if sources
+                    .iter()
+                    .any(|path| fs_ops::archive_fs::is_inside(path))
+                {
+                    // Inside an archive: it's written again without them.
+                    self.spawn_operation(OpKind::Delete, |cancel, _| {
+                        fs_ops::ops::delete_in_archive(sources, cancel)
+                    })
+                } else if self.delete_permanently {
                     self.spawn_operation(OpKind::Delete, |cancel, _| {
                         fs_ops::ops::delete_permanently(sources, cancel)
                     })
@@ -984,36 +1075,127 @@ impl App {
                 self.pane_mut(self.active_pane)
                     .update(PaneMessage::Navigate(path))
             }
-            Message::CompressNameChanged(value) => {
-                if let Some(compress) = &mut self.compress {
-                    compress.name = value;
+            Message::PackPathChanged(value) => {
+                if let Some(pack) = &mut self.compress {
+                    pack.path = value;
                 }
                 Task::none()
             }
-            Message::ConfirmCompress => {
+            Message::PackFormatSelected(index) => {
+                if let Some(pack) = &mut self.compress {
+                    if let Some(format) = fs_ops::ops::ArchiveFormat::ALL.get(index) {
+                        pack.format = *format;
+                        pack.path = with_archive_extension(&pack.path, *format);
+                    }
+                }
+                Task::none()
+            }
+            Message::PackPasswordChanged(value) => {
+                if let Some(pack) = &mut self.compress {
+                    pack.password = value;
+                }
+                Task::none()
+            }
+            Message::PackTogglePassword => {
+                if let Some(pack) = &mut self.compress {
+                    pack.password_hidden = !pack.password_hidden;
+                }
+                Task::none()
+            }
+            Message::PackMoveToggled(move_files) => {
+                if let Some(pack) = &mut self.compress {
+                    pack.move_files = move_files;
+                }
+                Task::none()
+            }
+            Message::ConfirmPack => {
                 if self.operation.is_some() {
                     // Keep the dialog open; the user can retry once it finishes.
                     return Task::none();
                 }
-                let Some(compress) = self.compress.take() else {
+                let Some(pack) = self.compress.take() else {
                     return Task::none();
                 };
-                let mut name = compress.name.trim().to_string();
-                if name.is_empty() {
-                    self.compress = Some(compress);
+                let path = pack.path.trim();
+                if path.is_empty() || pack_problem(&pack).is_some() {
+                    self.compress = Some(pack);
                     return Task::none();
                 }
-                if !name.to_lowercase().ends_with(".zip") {
-                    name.push_str(".zip");
-                }
-                let archive = compress.dir.join(name);
-                let sources = compress.sources;
+                // A bare name goes into the dialog's default folder.
+                let archive = {
+                    let typed = PathBuf::from(path);
+                    if typed.is_absolute() {
+                        typed
+                    } else {
+                        pack.folder.join(typed)
+                    }
+                };
+                let options = fs_ops::ops::PackOptions {
+                    format: pack.format,
+                    password: (pack.format.encrypts() && !pack.password.is_empty())
+                        .then(|| pack.password.clone()),
+                    move_files: pack.move_files,
+                };
+                let sources = pack.sources;
                 self.spawn_operation(OpKind::Compress, |cancel, _| {
-                    fs_ops::ops::compress_zip(sources, archive, cancel)
+                    fs_ops::ops::pack(sources, archive, options, cancel)
                 })
             }
-            Message::CancelCompress => {
+            Message::CancelPack => {
                 self.compress = None;
+                Task::none()
+            }
+            Message::UnpackKeepPathsToggled(keep) => {
+                if let Some(unpack) = &mut self.unpack {
+                    unpack.keep_paths = keep;
+                }
+                Task::none()
+            }
+            Message::UnpackOverwriteToggled(overwrite) => {
+                if let Some(unpack) = &mut self.unpack {
+                    unpack.overwrite = overwrite;
+                }
+                Task::none()
+            }
+            Message::UnpackPasswordChanged(value) => {
+                if let Some(unpack) = &mut self.unpack {
+                    unpack.password = value;
+                }
+                Task::none()
+            }
+            Message::UnpackTogglePassword => {
+                if let Some(unpack) = &mut self.unpack {
+                    unpack.password_hidden = !unpack.password_hidden;
+                }
+                Task::none()
+            }
+            Message::ConfirmUnpack => {
+                if self.operation.is_some() {
+                    return Task::none();
+                }
+                let Some(unpack) = self.unpack.take() else {
+                    return Task::none();
+                };
+                let options = fs_ops::ops::UnpackOptions {
+                    keep_paths: unpack.keep_paths,
+                    overwrite: unpack.overwrite,
+                    password: (!unpack.password.is_empty()).then_some(unpack.password),
+                };
+                let (archives, dest) = (unpack.archives, unpack.dest);
+                self.spawn_operation(OpKind::Unpack, |cancel, conflict| {
+                    fs_ops::ops::unpack(archives, dest, options, cancel, conflict)
+                })
+            }
+            Message::CancelUnpack => {
+                self.unpack = None;
+                Task::none()
+            }
+            Message::CancelConflict => {
+                if let Some(operation) = &self.operation {
+                    operation.cancel.cancel();
+                    operation.conflict.respond(ConflictResolution::Skip);
+                }
+                self.pending_conflict = None;
                 Task::none()
             }
             Message::OpenWithLoaded(paths, apps) => {
@@ -1043,6 +1225,31 @@ impl App {
                 Task::none()
             }
             Message::Launched => Task::none(),
+            Message::RefreshDrives => refresh_drives(),
+            Message::DrivesLoaded(drives) => {
+                self.drives = drives;
+                Task::none()
+            }
+            Message::DriveMounted(id, result) => {
+                let open = match result {
+                    Ok(mount) => self.pane_mut(id).update(PaneMessage::Navigate(mount)),
+                    Err(error) => self.pane_mut(id).update(PaneMessage::ShowError(fl!(
+                        "drive-mount-failed",
+                        error = error
+                    ))),
+                };
+                Task::batch([open, refresh_drives()])
+            }
+            Message::DriveEjected(id, result) => {
+                let shown = match result {
+                    Ok(()) => Task::none(),
+                    Err(error) => self.pane_mut(id).update(PaneMessage::ShowError(fl!(
+                        "drive-eject-failed",
+                        error = error
+                    ))),
+                };
+                Task::batch([shown, refresh_drives()])
+            }
             Message::ColumnResize(message) => {
                 let left = self.left.update(message.clone());
                 let right = self.right.update(message);
@@ -1056,7 +1263,7 @@ impl App {
                     None => self.active_pane,
                 };
                 self.set_active_pane(id);
-                if self.pane(id).showing_results() {
+                if self.pane(id).read_only() {
                     return Task::none();
                 }
                 let dest = self.pane(id).current_dir();
@@ -1082,6 +1289,11 @@ impl App {
             Message::SeparateExtensionToggled(separate) => {
                 self.focus_settings_row(SettingsRow::SeparateExtension);
                 self.settings.separate_extension = separate;
+                self.apply_settings()
+            }
+            Message::RowLinesToggled(show) => {
+                self.focus_settings_row(SettingsRow::RowLines);
+                self.settings.row_lines = show;
                 self.apply_settings()
             }
             Message::ThumbnailsToggled(show) => {
@@ -1508,7 +1720,8 @@ impl App {
         };
         let mut paths = HashSet::new();
         for dir in [self.left.current_dir(), self.right.current_dir()] {
-            if !fs_ops::vfs::is_remote(&dir) {
+            // Real folders only (not servers, not archives).
+            if !fs_ops::vfs::is_remote(&dir) && dir.is_dir() {
                 paths.insert(dir);
             }
         }
@@ -1591,7 +1804,12 @@ impl App {
                 })
             }
             Action::Terminal => {
-                launch::open_terminal(&self.pane(self.active_pane).current_dir());
+                // Inside an archive: in the folder holding the archive.
+                let dir = self.pane(self.active_pane).current_dir();
+                let dir = fs_ops::archive_fs::split(&dir)
+                    .and_then(|(archive, _)| archive.parent().map(PathBuf::from))
+                    .unwrap_or(dir);
+                launch::open_terminal(&dir);
                 Task::none()
             }
             Action::Copy => self.start_operation(OpKind::Copy),
@@ -1601,13 +1819,22 @@ impl App {
                 if sources.is_empty() {
                     return Task::none();
                 }
-                // Servers have no trash: deleting there is always permanent.
+                // Servers and archives have no trash: deleting there is
+                // always permanent.
                 self.delete_permanently = action == Action::DeletePermanently
-                    || sources.iter().any(|path| fs_ops::vfs::is_remote(path));
+                    || sources.iter().any(|path| {
+                        fs_ops::vfs::is_remote(path) || fs_ops::archive_fs::is_inside(path)
+                    });
                 self.confirm_delete = Some(sources);
                 // Focus "Delete" so Enter confirms (Escape still cancels).
                 self.focus_delete_button(true)
             }
+            Action::Rename
+                if fs_ops::archive_fs::in_archive(&self.pane(self.active_pane).current_dir()) =>
+            {
+                Task::none()
+            }
+            Action::NewFolder if self.pane(self.active_pane).read_only() => Task::none(),
             Action::Rename => {
                 let mut sources = self.pane(self.active_pane).selected_paths();
                 if sources.len() != 1 {
@@ -1641,6 +1868,11 @@ impl App {
                 .pane_mut(self.active_pane)
                 .update(PaneMessage::CalculateDirSizes),
             Action::FolderSize => self.open_folder_size(),
+            Action::FolderTree => {
+                self.settings.folder_tree = self.settings.folder_tree.next();
+                self.persist_settings();
+                self.apply_folder_tree()
+            }
             Action::SelectFirst
             | Action::SelectLast
             | Action::ExtendSelectionToFirst
@@ -1677,6 +1909,14 @@ impl App {
                     return self
                         .pane_mut(self.active_pane)
                         .update(PaneMessage::Navigate(dir));
+                }
+                // An archive opens as a folder, like in Total Commander.
+                if let [single] = self.pane(self.active_pane).selected_paths().as_slice() {
+                    if opens_as_folder(single) {
+                        return self
+                            .pane_mut(self.active_pane)
+                            .update(PaneMessage::Navigate(single.clone()));
+                    }
                 }
                 // Folders in a multi-selection are skipped: we can't navigate
                 // into several at once, and handing them to `xdg-open` would
@@ -1719,15 +1959,69 @@ impl App {
                 Task::none()
             }
             Action::Paste => self.paste(),
-            Action::Compress => {
+            Action::Compress | Action::CompressHere => {
                 let sources = self.pane(self.active_pane).selected_paths();
-                if sources.is_empty() {
+                if sources.is_empty() || sources.iter().any(|path| fs_ops::vfs::is_remote(path)) {
                     return Task::none();
                 }
-                let dir = self.pane(self.active_pane).current_dir();
+                // The right-click menu packs next to the files; the toolbar
+                // button into the other panel's folder (this one's when that
+                // can't take files: a server, an archive, search results).
+                let here = self.pane(self.active_pane).current_dir();
+                let other_pane = self.pane(self.active_pane.other());
+                let dir = if action == Action::CompressHere
+                    || other_pane.read_only()
+                    || fs_ops::vfs::is_remote(&other_pane.current_dir())
+                {
+                    here
+                } else {
+                    other_pane.current_dir()
+                };
                 let name = default_archive_name(&sources, &dir);
-                self.compress = Some(CompressState { sources, dir, name });
+                self.compress = Some(PackState {
+                    sources,
+                    path: dir.join(name).display().to_string(),
+                    folder: dir.clone(),
+                    format: fs_ops::ops::ArchiveFormat::Zip,
+                    password: String::new(),
+                    password_hidden: true,
+                    move_files: false,
+                });
                 self.focus_dialog_field(0)
+            }
+            Action::ExtractHere | Action::Extract => {
+                let archives: Vec<PathBuf> = self
+                    .pane(self.active_pane)
+                    .selected_paths()
+                    .into_iter()
+                    .filter(|path| {
+                        !fs_ops::vfs::is_remote(path)
+                            && path.is_file()
+                            && fs_ops::ops::ArchiveFormat::of(path).is_some()
+                    })
+                    .collect();
+                // The toolbar button unpacks into the other panel; the
+                // right-click menu next to the archive.
+                let dest = if action == Action::ExtractHere {
+                    self.pane(self.active_pane).current_dir()
+                } else {
+                    self.pane(self.active_pane.other()).current_dir()
+                };
+                if archives.is_empty()
+                    || fs_ops::vfs::is_remote(&dest)
+                    || fs_ops::archive_fs::in_archive(&dest)
+                {
+                    return Task::none();
+                }
+                self.unpack = Some(UnpackState {
+                    archives,
+                    dest,
+                    keep_paths: true,
+                    overwrite: false,
+                    password: String::new(),
+                    password_hidden: true,
+                });
+                Task::none()
             }
             Action::ShowDetails => {
                 let paths = self.pane(self.active_pane).selected_paths();
@@ -1796,6 +2090,7 @@ impl App {
             icon_style: self.settings.icon_style,
             user_dirs: self.user_dirs.clone(),
             show_thumbnails: self.settings.show_thumbnails,
+            row_lines: self.settings.row_lines,
             font_size: self.settings.name_font_size,
             separate_extension: self.settings.separate_extension,
         }
@@ -1918,6 +2213,7 @@ impl App {
                 Message::SeparateExtensionToggled(!self.settings.separate_extension)
             }
             SettingsRow::Thumbnails => Message::ThumbnailsToggled(!self.settings.show_thumbnails),
+            SettingsRow::RowLines => Message::RowLinesToggled(!self.settings.row_lines),
             SettingsRow::Language => {
                 let current = localize::LANGUAGES
                     .iter()
@@ -2492,7 +2788,14 @@ impl App {
                             Message::FontSizeSelected,
                         )),
                 ),
-            );
+            )
+            .add(self.checkbox_row(
+                SettingsRow::RowLines,
+                fl!("settings-row-lines"),
+                fl!("settings-row-lines-description"),
+                self.settings.row_lines,
+                Message::RowLinesToggled,
+            ));
 
         widget::settings::view_column(vec![general.into(), theme.into()]).into()
     }
@@ -2653,6 +2956,15 @@ impl App {
         self.refresh_folder_size()
     }
 
+    /// Shows the folder tree beside the panels the setting names.
+    fn apply_folder_tree(&mut self) -> Task<Message> {
+        let mode = self.settings.folder_tree;
+        Task::batch([
+            self.left.set_tree_visible(mode.left()),
+            self.right.set_tree_visible(mode.right()),
+        ])
+    }
+
     /// What Folder Size would analyze: the single selected folder, else the
     /// active panel's folder; never a server folder.
     fn folder_size_root(&self) -> Option<PathBuf> {
@@ -2660,7 +2972,7 @@ impl App {
         let root = pane
             .selected_single_dir()
             .or_else(|| pane.selected_paths().is_empty().then(|| pane.current_dir()))?;
-        (!fs_ops::vfs::is_remote(&root)).then_some(root)
+        (!fs_ops::vfs::is_remote(&root) && !fs_ops::archive_fs::in_archive(&root)).then_some(root)
     }
 
     /// (Re)scans the Folder Size panel's folder, reporting progress a few
@@ -2711,7 +3023,7 @@ impl App {
 
     fn paste_to(&mut self, dest: PathBuf) -> Task<Message> {
         // Pasting always targets the active pane: never search results.
-        if self.operation.is_some() || self.pane(self.active_pane).showing_results() {
+        if self.operation.is_some() || self.pane(self.active_pane).read_only() {
             return Task::none();
         }
         let Some(clipboard) = &self.clipboard else {
@@ -2814,6 +3126,7 @@ impl App {
             || self.new_folder.is_some()
             || self.pending_conflict.is_some()
             || self.compress.is_some()
+            || self.unpack.is_some()
             || self.open_with.is_some()
             || self.details.is_some()
             || self.connect.is_some()
@@ -2840,7 +3153,7 @@ impl App {
         }
         let sources = self.pane(self.active_pane).selected_paths();
         // F5/F6 can't copy or move into search results ("View in Listbox").
-        if sources.is_empty() || self.pane(self.active_pane.other()).showing_results() {
+        if sources.is_empty() || self.pane(self.active_pane.other()).read_only() {
             return Task::none();
         }
         let dest = self.pane(self.active_pane.other()).current_dir();
@@ -2851,7 +3164,7 @@ impl App {
             OpKind::Move => self.spawn_operation(kind, |cancel, conflict| {
                 fs_ops::ops::move_paths(sources, dest, cancel, conflict)
             }),
-            OpKind::Delete | OpKind::Compress => Task::none(),
+            OpKind::Delete | OpKind::Compress | OpKind::Unpack => Task::none(),
         }
     }
 
@@ -2903,6 +3216,7 @@ impl Application for App {
             icon_style: settings.icon_style,
             user_dirs: user_dirs.clone(),
             show_thumbnails: settings.show_thumbnails,
+            row_lines: settings.row_lines,
             font_size: settings.name_font_size,
             separate_extension: settings.separate_extension,
         };
@@ -2968,9 +3282,11 @@ impl Application for App {
             delete_focus_on_confirm: true,
             clipboard: None,
             compress: None,
+            unpack: None,
             open_with: None,
             details: None,
             folder_size: None,
+            drives: Vec::new(),
             settings,
             user_dirs,
             drawer: None,
@@ -2987,7 +3303,19 @@ impl Application for App {
         } else {
             app.apply_color_theme()
         };
-        (app, Task::batch(vec![left_task, right_task, theme_task]))
+        let drives_task = refresh_drives();
+        let mut app = app;
+        let tree_task = app.apply_folder_tree();
+        (
+            app,
+            Task::batch(vec![
+                left_task,
+                right_task,
+                theme_task,
+                drives_task,
+                tree_task,
+            ]),
+        )
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Message> {
@@ -3015,6 +3343,7 @@ impl Application for App {
             self.pane(self.active_pane).view_mode(),
             fs_ops::vfs::is_remote(&self.pane(self.active_pane).current_dir()),
             can_folder_size,
+            self.settings.folder_tree,
         )
     }
 
@@ -3075,6 +3404,7 @@ impl Application for App {
             return Task::none();
         }
         if self.compress.take().is_some()
+            || self.unpack.take().is_some()
             || self.open_with.take().is_some()
             || self.details.take().is_some()
         {
@@ -3118,6 +3448,8 @@ impl Application for App {
             keys,
             watcher::subscription().map(Message::WatcherEvent),
             focus_subscription(),
+            // A USB stick plugged in shows up in the drive menus.
+            cosmic::iced::time::every(Duration::from_secs(3)).map(|_| Message::RefreshDrives),
         ])
     }
 
@@ -3193,7 +3525,8 @@ impl Application for App {
                 )
                 .push(
                     widget::button::standard(fl!("rename")).on_press(Message::BeginConflictRename),
-                );
+                )
+                .push(widget::button::standard(fl!("cancel")).on_press(Message::CancelConflict));
             return Some(
                 widget::dialog()
                     .title(fl!("conflict-title"))
@@ -3213,33 +3546,17 @@ impl Application for App {
             );
         }
 
-        if let Some(compress) = &self.compress {
-            let body = match compress.sources.as_slice() {
-                [single] => fl!("compress-one", name = tab_label(single)),
-                many => fl!("compress-many", count = many.len()),
-            };
-            return Some(
-                widget::dialog()
-                    .title(fl!("compress"))
-                    .body(body)
-                    .control(
-                        widget::text_input(fl!("archive-name"), compress.name.as_str())
-                            .id(self.dialog_input.clone())
-                            .on_input(Message::CompressNameChanged)
-                            .on_submit(|_| Message::ConfirmCompress),
-                    )
-                    .primary_action(
-                        widget::button::suggested(fl!("compress"))
-                            .id(self.dialog_confirm.clone())
-                            .on_press(Message::ConfirmCompress),
-                    )
-                    .secondary_action(
-                        widget::button::standard(fl!("cancel"))
-                            .id(self.dialog_cancel.clone())
-                            .on_press(Message::CancelCompress),
-                    )
-                    .into(),
-            );
+        if let Some(pack) = &self.compress {
+            return Some(pack_dialog(
+                pack,
+                self.dialog_input.clone(),
+                self.dialog_confirm.clone(),
+                self.dialog_cancel.clone(),
+            ));
+        }
+
+        if let Some(unpack) = &self.unpack {
+            return Some(unpack_dialog(unpack));
         }
 
         if let Some(open_with) = &self.open_with {
@@ -3448,6 +3765,7 @@ impl Application for App {
                     select_mode,
                     &self.keybinds,
                     can_paste,
+                    &self.drives,
                 )
                 .map(|msg| Message::Pane(PaneId::Left, msg)),
         };
@@ -3460,6 +3778,7 @@ impl Application for App {
                     select_mode,
                     &self.keybinds,
                     can_paste,
+                    &self.drives,
                 )
                 .map(|msg| Message::Pane(PaneId::Right, msg)),
         };
@@ -3564,6 +3883,16 @@ fn key_subscription() -> Subscription<Message> {
 }
 
 /// Fires when the main window regains focus, so the active pane can refresh.
+/// Reads the drive list in the background (it runs `lsblk`).
+fn refresh_drives() -> Task<Message> {
+    cosmic::task::future(async {
+        let drives = tokio::task::spawn_blocking(fs_ops::drives::list)
+            .await
+            .unwrap_or_default();
+        Message::DrivesLoaded(drives)
+    })
+}
+
 fn focus_subscription() -> Subscription<Message> {
     listen_raw(|event, _status, window| match event {
         Event::Window(cosmic::iced::window::Event::Focused) => Some(Message::WindowFocused(window)),
@@ -3722,6 +4051,154 @@ fn details_dialog(state: &DetailsState) -> Element<'_, Message> {
 
 /// `<name>.zip` for a single item (dropping a file's own extension), else
 /// `Archive.zip`, numbered if that name is already taken in `dir`.
+/// The Pack dialog: where the archive goes, its format, a password (zip
+/// and 7z) and "Move to archive".
+fn pack_dialog(
+    pack: &PackState,
+    input: widget::Id,
+    confirm: widget::Id,
+    cancel: widget::Id,
+) -> Element<'_, Message> {
+    use fs_ops::ops::ArchiveFormat;
+    let body = match pack.sources.as_slice() {
+        [single] => fl!("pack-one", name = tab_label(single)),
+        many => fl!("pack-many", count = many.len()),
+    };
+    let formats: Vec<&'static str> = ArchiveFormat::ALL.iter().map(|f| f.extension()).collect();
+    let selected = ArchiveFormat::ALL.iter().position(|f| *f == pack.format);
+    let password = widget::secure_input(
+        if pack.format.encrypts() {
+            fl!("pack-password")
+        } else {
+            fl!("pack-password-unavailable")
+        },
+        pack.password.as_str(),
+        Some(Message::PackTogglePassword),
+        pack.password_hidden,
+    )
+    // Ignored unless the format encrypts (the placeholder says so).
+    .on_input(Message::PackPasswordChanged);
+    let problem = pack_problem(pack).map(|problem| {
+        widget::text::caption(problem).class(cosmic::theme::Text::Color(
+            cosmic::iced::Color::from_rgb(0.85, 0.25, 0.25),
+        ))
+    });
+    let controls = widget::Column::new()
+        .spacing(10)
+        .push(widget::text::caption(fl!("pack-path")))
+        .push(
+            widget::text_input(fl!("pack-path"), pack.path.as_str())
+                .id(input)
+                .on_input(Message::PackPathChanged)
+                .on_submit(|_| Message::ConfirmPack),
+        )
+        .push(
+            widget::Row::new()
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .push(widget::text::body(fl!("pack-format")))
+                .push(widget::dropdown(
+                    formats,
+                    selected,
+                    Message::PackFormatSelected,
+                )),
+        )
+        .push(password)
+        .push(
+            widget::checkbox(pack.move_files)
+                .label(fl!("pack-move"))
+                .on_toggle(Message::PackMoveToggled),
+        )
+        .push_maybe(problem);
+    widget::dialog()
+        .title(fl!("pack"))
+        .body(body)
+        .control(controls)
+        .primary_action(
+            widget::button::suggested(fl!("pack"))
+                .id(confirm)
+                .on_press_maybe(pack_problem(pack).is_none().then_some(Message::ConfirmPack)),
+        )
+        .secondary_action(
+            widget::button::standard(fl!("cancel"))
+                .id(cancel)
+                .on_press(Message::CancelPack),
+        )
+        .into()
+}
+
+/// Why the Pack dialog's choices can't be packed (gz and xz hold a single
+/// file), if they can't.
+fn pack_problem(pack: &PackState) -> Option<String> {
+    let one_file = matches!(pack.sources.as_slice(), [single] if single.is_file());
+    (pack.format.single_file() && !one_file).then(|| fl!("pack-single-file-only"))
+}
+
+/// `path` with its archive extension replaced by `format`'s.
+fn with_archive_extension(path: &str, format: fs_ops::ops::ArchiveFormat) -> String {
+    let lower = path.to_lowercase();
+    let known = [
+        ".tar.gz", ".tar.xz", ".zip", ".tar", ".tgz", ".txz", ".gz", ".xz", ".7z",
+    ];
+    let stem = known
+        .iter()
+        .find(|suffix| lower.ends_with(*suffix))
+        .map_or(path, |suffix| &path[..path.len() - suffix.len()]);
+    format!("{stem}.{}", format.extension())
+}
+
+/// The Extract dialog: unpack into the other panel, with or without the
+/// stored folders, replacing existing files or not, with a password.
+fn unpack_dialog(unpack: &UnpackState) -> Element<'_, Message> {
+    let body = match unpack.archives.as_slice() {
+        [single] => fl!(
+            "unpack-one",
+            name = tab_label(single),
+            dest = unpack.dest.display().to_string()
+        ),
+        many => fl!(
+            "unpack-many",
+            count = many.len(),
+            dest = unpack.dest.display().to_string()
+        ),
+    };
+    let controls = widget::Column::new()
+        .spacing(10)
+        .push(
+            widget::checkbox(unpack.keep_paths)
+                .label(fl!("unpack-keep-paths"))
+                .on_toggle(Message::UnpackKeepPathsToggled),
+        )
+        .push(
+            widget::checkbox(unpack.overwrite)
+                .label(fl!("unpack-overwrite"))
+                .on_toggle(Message::UnpackOverwriteToggled),
+        )
+        .push(
+            widget::secure_input(
+                fl!("unpack-password"),
+                unpack.password.as_str(),
+                Some(Message::UnpackTogglePassword),
+                unpack.password_hidden,
+            )
+            .on_input(Message::UnpackPasswordChanged)
+            .on_submit(|_| Message::ConfirmUnpack),
+        );
+    widget::dialog()
+        .title(fl!("unpack"))
+        .body(body)
+        .control(controls)
+        .primary_action(widget::button::suggested(fl!("unpack")).on_press(Message::ConfirmUnpack))
+        .secondary_action(widget::button::standard(fl!("cancel")).on_press(Message::CancelUnpack))
+        .into()
+}
+
+/// Whether `path` is an archive on disk that opens as a folder (Enter,
+/// double-click).
+pub fn opens_as_folder(path: &std::path::Path) -> bool {
+    fs_ops::archive_fs::browsable(path) && path.is_file()
+}
+
 fn default_archive_name(sources: &[PathBuf], dir: &std::path::Path) -> String {
     let stem = match sources {
         [single] if single.is_dir() => tab_label(single),

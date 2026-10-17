@@ -41,23 +41,23 @@ pub fn compress_zip(
     ReceiverStream::new(rx)
 }
 
-struct ArchiveEntry {
-    src: PathBuf,
+pub(super) struct ArchiveEntry {
+    pub(super) src: PathBuf,
     /// Path inside the archive, `/`-separated.
-    name: String,
-    kind: ArchiveEntryKind,
-    size: u64,
-    mode: u32,
+    pub(super) name: String,
+    pub(super) kind: ArchiveEntryKind,
+    pub(super) size: u64,
+    pub(super) mode: u32,
 }
 
-enum ArchiveEntryKind {
+pub(super) enum ArchiveEntryKind {
     Dir,
     File,
     Symlink(PathBuf),
 }
 
 /// Walks every source up front so progress can report totals.
-fn plan(sources: &[PathBuf]) -> Result<Vec<ArchiveEntry>, String> {
+pub(super) fn plan(sources: &[PathBuf]) -> Result<Vec<ArchiveEntry>, String> {
     let mut entries = Vec::new();
     for source in sources {
         let root_name = source

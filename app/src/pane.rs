@@ -94,6 +94,18 @@ pub enum PaneMessage {
     /// Windows: right button released over a file, show Explorer's menu
     /// for the selection. Handled by the app.
     ShowShellMenu,
+    /// Opens or closes a folder in the folder tree.
+    TreeToggle(PathBuf),
+    /// A folder's subfolders, read for the folder tree.
+    TreeLoaded(PathBuf, Vec<PathBuf>),
+    /// The drive menu picked an unmounted drive: mount it (this partition)
+    /// and open it. Handled by the app.
+    MountDrive(String),
+    /// Unmount and power off a USB stick or other removable drive. Handled
+    /// by the app.
+    EjectDrive(fs_ops::drives::Drive),
+    /// Something went wrong (e.g. mounting): shown in place of the files.
+    ShowError(String),
     /// The left button went down on the divider after the list column at
     /// this index: start resizing.
     ColumnResizeStart(usize),
@@ -174,6 +186,8 @@ pub struct PaneState {
     /// selection; otherwise nothing).
     marquee_base: HashSet<table::Entity>,
     drop_hover: Option<PathBuf>,
+    /// The folder tree beside the files, while shown.
+    tree: Option<crate::folder_tree::FolderTree>,
 }
 
 impl PaneState {
@@ -216,6 +230,7 @@ impl PaneState {
             thumbnails: HashMap::new(),
             thumbnails_requested: HashSet::new(),
             drop_hover: None,
+            tree: None,
             column_resize: None,
             marquee_base: HashSet::new(),
         };
@@ -290,7 +305,9 @@ impl PaneState {
                 let Some(item) = tab_state.entries.item(entity) else {
                     return Task::none();
                 };
-                if item.is_dir() {
+                // Folders, and archives (opened as folders, like in Total
+                // Commander).
+                if item.is_dir() || crate::app::opens_as_folder(&item.path) {
                     let path = item.path.clone();
                     return self.navigate_active(path);
                 }
@@ -380,7 +397,25 @@ impl PaneState {
                 }
                 Task::none()
             }
-            PaneMessage::Action(_) | PaneMessage::DropFiles { .. } | PaneMessage::ShowShellMenu => {
+            PaneMessage::Action(_)
+            | PaneMessage::DropFiles { .. }
+            | PaneMessage::ShowShellMenu
+            | PaneMessage::MountDrive(_)
+            | PaneMessage::EjectDrive(_) => Task::none(),
+            PaneMessage::TreeToggle(dir) => {
+                let load = self.tree.as_mut().and_then(|tree| tree.toggle(dir));
+                load.map_or_else(Task::none, |dir| self.load_tree(dir))
+            }
+            PaneMessage::TreeLoaded(dir, children) => {
+                if let Some(tree) = &mut self.tree {
+                    tree.set_children(dir, children);
+                }
+                Task::none()
+            }
+            PaneMessage::ShowError(error) => {
+                if let Some(tab_state) = self.tabs.active_data_mut::<TabState>() {
+                    tab_state.error = Some(error);
+                }
                 Task::none()
             }
             PaneMessage::ColumnResizeStart(divider) => {
@@ -598,7 +633,8 @@ impl PaneState {
             PaneMessage::SelectTab(entity) => {
                 self.cancel_path_edit();
                 self.tabs.activate(entity);
-                Task::none()
+                // The tree follows the tab's folder.
+                self.reveal_in_tree()
             }
             PaneMessage::StartPathEdit => {
                 let mut text = self.current_dir().display().to_string();
@@ -792,7 +828,8 @@ impl PaneState {
             tab_state.results = None;
         }
         let _ = self.tabs.text_set(tab_id, tab_label(&path));
-        load_dir(self.id, tab_id, path)
+        let load = load_dir(self.id, tab_id, path);
+        Task::batch([load, self.reveal_in_tree()])
     }
 
     /// Hides this pane's selection while it's inactive (remembering it).
@@ -883,7 +920,19 @@ impl PaneState {
 
     /// Applies new display options (hidden files, icons) to every tab of this pane.
     pub fn set_options(&mut self, options: ListingOptions) -> Task<Message> {
+        // Hidden folders switched on or off: the tree reads its folders again.
+        let reload_tree = self.options.hide_hidden != options.hide_hidden;
         self.options = options;
+        let mut tree_tasks = Vec::new();
+        if reload_tree {
+            if let Some(tree) = &mut self.tree {
+                tree_tasks = tree.reload();
+            }
+        }
+        let tree_tasks: Vec<Task<Message>> = tree_tasks
+            .into_iter()
+            .map(|dir| self.load_tree(dir))
+            .collect();
         let tabs: Vec<TabId> = self.tabs.iter().collect();
         let mut tasks = Vec::new();
         for tab in tabs {
@@ -894,6 +943,7 @@ impl PaneState {
             // e.g. thumbnails were just switched on
             tasks.push(self.request_thumbnails(tab));
         }
+        tasks.extend(tree_tasks);
         Task::batch(tasks)
     }
 
@@ -907,8 +957,10 @@ impl PaneState {
         let Some(tab_state) = self.tabs.data::<TabState>(tab) else {
             return Task::none();
         };
-        if fs_ops::vfs::is_remote(&tab_state.current_dir) {
-            // That would download every file; not on a server.
+        if fs_ops::vfs::is_remote(&tab_state.current_dir)
+            || fs_ops::archive_fs::in_archive(&tab_state.current_dir)
+        {
+            // That would download (or extract) every file.
             return Task::none();
         }
         let mut wanted = Vec::new();
@@ -1053,12 +1105,50 @@ impl PaneState {
         }
     }
 
-    /// Whether the active tab shows search results ("View in Listbox"):
-    /// nothing can be copied or moved into it.
-    pub fn showing_results(&self) -> bool {
+    /// Shows or hides the folder tree beside the files.
+    pub fn set_tree_visible(&mut self, visible: bool) -> Task<Message> {
+        match (visible, self.tree.is_some()) {
+            (true, false) => {
+                self.tree = Some(crate::folder_tree::FolderTree::default());
+                self.reveal_in_tree()
+            }
+            (false, true) => {
+                self.tree = None;
+                Task::none()
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// Opens the tree down to the current folder, reading what's needed.
+    fn reveal_in_tree(&mut self) -> Task<Message> {
+        let current = self.current_dir();
+        if fs_ops::vfs::is_remote(&current) {
+            return Task::none();
+        }
+        let Some(tree) = &mut self.tree else {
+            return Task::none();
+        };
+        let to_load = tree.reveal(&current);
+        Task::batch(to_load.into_iter().map(|dir| self.load_tree(dir)))
+    }
+
+    /// Reads `dir`'s subfolders for the tree.
+    fn load_tree(&self, dir: PathBuf) -> Task<Message> {
+        let pane = self.id;
+        let hide_hidden = self.options.hide_hidden;
+        cosmic::task::future(async move {
+            let children = crate::folder_tree::read_subfolders(dir.clone(), hide_hidden).await;
+            Message::Pane(pane, PaneMessage::TreeLoaded(dir, children))
+        })
+    }
+
+    /// Whether nothing can be copied, moved, pasted or dropped into the active
+    /// tab: search results ("View in Listbox"), or the inside of an archive.
+    pub fn read_only(&self) -> bool {
         self.tabs
             .active_data::<TabState>()
-            .is_some_and(|tab_state| tab_state.results.is_some())
+            .is_some_and(tab_read_only)
     }
 
     /// Opens a new tab listing `paths` (search results found in `root`), where
@@ -1088,17 +1178,18 @@ impl PaneState {
         load_results(self.id, tab_id, root, paths)
     }
 
-    pub fn view(
-        &self,
+    pub fn view<'a>(
+        &'a self,
         is_active: bool,
         select_mode: SelectMode,
         keybinds: &HashMap<KeyBind, Action>,
         can_paste: bool,
-    ) -> Element<'_, PaneMessage> {
+        drives: &[fs_ops::drives::Drive],
+    ) -> Element<'a, PaneMessage> {
         let active = self.tabs.active();
         let tab_state = self.tabs.data::<TabState>(active);
         // Search results take no pasted files: Paste shows as unavailable.
-        let can_paste = can_paste && tab_state.is_none_or(|tab| tab.results.is_none());
+        let can_paste = can_paste && !tab_state.is_some_and(tab_read_only);
 
         let tab_bar = self.tab_strip();
 
@@ -1112,7 +1203,8 @@ impl PaneState {
         let header = widget::Row::new()
             .spacing(4)
             .align_y(cosmic::iced::Alignment::Center)
-            .push_maybe(drive_menu(tab_state))
+            .push_maybe(drive_menu(tab_state, drives))
+            .push_maybe(eject_button(tab_state, drives))
             .push(nav_button(
                 widget::icon::from_name("go-previous-symbolic").handle(),
                 fl!("tooltip-back"),
@@ -1233,7 +1325,7 @@ impl PaneState {
                         .push(background_menu)
                         .push(listing);
                     // Search results aren't a folder: nothing can be dropped in.
-                    if t.results.is_some() {
+                    if tab_read_only(t) {
                         listing.into()
                     } else {
                         drop_target(listing, t.current_dir.clone(), false)
@@ -1246,7 +1338,21 @@ impl PaneState {
             .spacing(8)
             .push(tab_bar)
             .push(header)
-            .push(content)
+            .push(match &self.tree {
+                // The folder tree beside the files.
+                Some(tree) => {
+                    let roots = tree_roots(drives);
+                    let current = tab_state.map(|t| t.current_dir.clone()).unwrap_or_default();
+                    widget::Row::new()
+                        .spacing(6)
+                        .push(tree.view(&roots, &current, &self.options))
+                        .push(widget::divider::vertical::default())
+                        .push(content)
+                        .height(Length::Fill)
+                        .into()
+                }
+                None => content,
+            })
             .push_maybe(tab_state.and_then(|t| t.filter.as_deref()).map(|filter| {
                 widget::search_input(fl!("filter-placeholder"), filter)
                     .id(self.filter_input_id.clone())
@@ -1445,7 +1551,7 @@ const LIST_SCROLL_PADDING: u16 = 8;
 
 /// Accent background for selected rows / cells; the drop highlight for a
 /// folder that files dragged over it would drop into (none otherwise).
-fn selection_class(selected: bool, drop_hover: bool) -> cosmic::theme::Container<'static> {
+pub fn selection_class(selected: bool, drop_hover: bool) -> cosmic::theme::Container<'static> {
     cosmic::theme::Container::custom(move |theme| {
         if drop_hover {
             return drop_highlight_style(theme);
@@ -1470,6 +1576,31 @@ fn selection_class(selected: bool, drop_hover: bool) -> cosmic::theme::Container
             ..Default::default()
         }
     })
+}
+
+/// The tops of the folder tree: `/` on Linux, the drive letters on Windows.
+fn tree_roots(drives: &[fs_ops::drives::Drive]) -> Vec<PathBuf> {
+    use fs_ops::drives::DriveKind;
+    let letters: Vec<PathBuf> = drives
+        .iter()
+        .filter(|drive| drive.kind == DriveKind::Letter)
+        .filter_map(|drive| drive.mount.clone())
+        .collect();
+    if letters.is_empty() {
+        vec![PathBuf::from("/")]
+    } else {
+        letters
+    }
+}
+
+/// A folder name in the tree: one line, in the selection's text color when
+/// it is the panel's folder.
+pub fn tree_text(
+    name: String,
+    font_size: FontSize,
+    selected: bool,
+) -> widget::Text<'static, cosmic::Theme> {
+    selected_text(one_line(name, font_size), selected)
 }
 
 /// A selected entry's text: black or white, whichever reads better on the
@@ -1723,7 +1854,17 @@ fn list_view<'a>(
             .on_double_click(PaneMessage::EntryDoubleClicked(entity))
             .on_right_press(PaneMessage::EntryRightClicked(entity));
         let entry = with_item_menu(area, item, keybinds, can_paste);
-        rows = rows.push(draggable_entry(entry, pane, tab_state, item, DragLook::Row));
+        let entry = draggable_entry(entry, pane, tab_state, item, DragLook::Row);
+        // One child per entry (the rubber band counts them), its line below.
+        rows = if pane.options.row_lines {
+            rows.push(
+                widget::Column::new()
+                    .push(entry)
+                    .push(widget::divider::horizontal::light()),
+            )
+        } else {
+            rows.push(entry)
+        };
     }
     rows.into()
 }
@@ -1838,7 +1979,7 @@ fn draggable_entry<'a>(
         .drag_icon(move |grab_offset| {
             drag_picture(look, picture.clone(), &name, count, grab_offset)
         });
-    if item.is_dir() && tab_state.results.is_none() {
+    if item.is_dir() && !tab_read_only(tab_state) {
         drop_target(source, item.path.clone(), true)
     } else {
         source.into()
@@ -2100,22 +2241,32 @@ fn with_item_menu<'a>(
     widget::context_menu(area, item_menu(keybinds, item, can_paste)).into()
 }
 
-/// Windows: a menu of the drives (`C:`, `D:`, ...) showing the current
-/// one; picking another goes to its root. `None` on Linux (one root).
-fn drive_menu(tab_state: Option<&TabState>) -> Option<Element<'static, PaneMessage>> {
-    let drives = fs_ops::drives::list();
+/// The drive menu: Windows' drive letters; on Linux the system, the home
+/// folder and the disks and USB sticks (mounted or not). It shows the drive
+/// of the current folder; picking one opens it (mounting it first if
+/// needed).
+fn drive_menu(
+    tab_state: Option<&TabState>,
+    drives: &[fs_ops::drives::Drive],
+) -> Option<Element<'static, PaneMessage>> {
     if drives.is_empty() {
         return None;
     }
-    let labels: Vec<String> = drives
+    let labels: Vec<String> = drives.iter().map(drive_name).collect();
+    let current = tab_state
+        .and_then(|tab| fs_ops::drives::containing(drives, &tab.current_dir))
+        .and_then(|current| drives.iter().position(|drive| drive == current));
+    let messages: Vec<PaneMessage> = drives
         .iter()
-        .map(|drive| fs_ops::drives::label(drive))
+        .map(|drive| match (&drive.mount, &drive.device) {
+            (Some(mount), _) => PaneMessage::Navigate(mount.clone()),
+            (None, Some(device)) => PaneMessage::MountDrive(device.clone()),
+            (None, None) => PaneMessage::ShowError(String::new()),
+        })
         .collect();
-    let current = tab_state.and_then(|tab| fs_ops::drives::drive_of(&tab.current_dir));
-    let selected = current.and_then(|current| drives.iter().position(|drive| *drive == current));
-    let menu = widget::dropdown(labels, selected, move |index| {
-        PaneMessage::Navigate(drives[index].clone())
-    });
+    let icons: Vec<widget::icon::Handle> = drives.iter().map(drive_icon).collect();
+    let menu = widget::dropdown(labels, current, move |index| messages[index].clone())
+        .icons(std::borrow::Cow::Owned(icons));
     Some(
         themes::tooltip(
             menu,
@@ -2124,6 +2275,72 @@ fn drive_menu(tab_state: Option<&TabState>) -> Option<Element<'static, PaneMessa
         )
         .into(),
     )
+}
+
+/// A drive's icon in the menu: 2fip's own (drawn in the text color), so it
+/// looks the same with any icon theme and on Windows.
+fn drive_icon(drive: &fs_ops::drives::Drive) -> widget::icon::Handle {
+    use fs_ops::drives::DriveKind;
+    let svg: &'static [u8] = match drive.kind {
+        DriveKind::System => include_bytes!("../resources/icons/drive-system.svg"),
+        DriveKind::Home => include_bytes!("../resources/icons/drive-home.svg"),
+        DriveKind::Removable => include_bytes!("../resources/icons/drive-usb.svg"),
+        DriveKind::Internal | DriveKind::Letter => {
+            include_bytes!("../resources/icons/drive-internal.svg")
+        }
+    };
+    widget::icon::from_svg_bytes(svg).symbolic(true)
+}
+
+/// A drive's line in the menu: "System", "Home", `C:`, or its name, size
+/// and kind ("STICK · 32 GB · USB · not mounted").
+fn drive_name(drive: &fs_ops::drives::Drive) -> String {
+    use fs_ops::drives::DriveKind;
+    let mut parts = match drive.kind {
+        DriveKind::System => return fl!("drive-system"),
+        DriveKind::Home => return fl!("drive-home"),
+        DriveKind::Letter => return drive.label.clone(),
+        DriveKind::Removable | DriveKind::Internal => Vec::new(),
+    };
+    if !drive.label.is_empty() {
+        parts.push(drive.label.clone());
+    }
+    if drive.size > 0 {
+        parts.push(format_size(drive.size));
+    }
+    if drive.kind == DriveKind::Removable {
+        parts.push(fl!("drive-removable"));
+    }
+    if drive.mount.is_none() {
+        parts.push(fl!("drive-not-mounted"));
+    }
+    parts.join(" · ")
+}
+
+/// Next to the drive menu while the panel is on a USB stick (or another
+/// removable drive): ejects it.
+fn eject_button(
+    tab_state: Option<&TabState>,
+    drives: &[fs_ops::drives::Drive],
+) -> Option<Element<'static, PaneMessage>> {
+    let drive = fs_ops::drives::containing(drives, &tab_state?.current_dir)?;
+    if !drive.ejectable() {
+        return None;
+    }
+    Some(
+        themes::tooltip(
+            widget::button::icon(widget::icon::from_name("media-eject-symbolic"))
+                .on_press(PaneMessage::EjectDrive(drive.clone())),
+            widget::text(fl!("tooltip-eject")),
+            widget::tooltip::Position::Bottom,
+        )
+        .into(),
+    )
+}
+
+/// Search results and archives take no files.
+fn tab_read_only(tab_state: &TabState) -> bool {
+    tab_state.results.is_some() || fs_ops::archive_fs::in_archive(&tab_state.current_dir)
 }
 
 pub fn home_dir() -> PathBuf {

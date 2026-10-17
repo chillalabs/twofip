@@ -32,6 +32,13 @@ impl ConflictHandle {
         }
     }
 
+    /// [`Self::ask`] for code on a blocking thread (unpacking).
+    pub(crate) fn ask_blocking(&self) -> ConflictResolution {
+        let (tx, rx) = oneshot::channel();
+        *self.pending.lock().unwrap() = Some(tx);
+        rx.blocking_recv().unwrap_or(ConflictResolution::Skip)
+    }
+
     /// Blocks until the UI calls `respond`. If the sender is dropped without
     /// an answer (e.g. the operation's stream is dropped), defaults to `Skip`.
     pub(crate) async fn ask(&self) -> ConflictResolution {

@@ -21,6 +21,8 @@ pub struct ListingOptions {
     pub user_dirs: Arc<HashMap<PathBuf, UserDir>>,
     /// Show content previews (images, PDFs, videos, ...) instead of icons.
     pub show_thumbnails: bool,
+    /// List view: a thin line between rows.
+    pub row_lines: bool,
     /// Text size of the names (and, in the list, the other columns).
     pub font_size: FontSize,
     /// List view: extension in its own column (else part of the name).

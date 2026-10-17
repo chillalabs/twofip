@@ -10,6 +10,7 @@ pub enum OpKind {
     Move,
     Delete,
     Compress,
+    Unpack,
 }
 
 impl OpKind {
@@ -20,6 +21,7 @@ impl OpKind {
             OpKind::Move => fl!("op-moving"),
             OpKind::Delete => fl!("op-deleting"),
             OpKind::Compress => fl!("op-compressing"),
+            OpKind::Unpack => fl!("op-unpacking"),
         }
     }
 
@@ -30,6 +32,7 @@ impl OpKind {
             OpKind::Move => fl!("op-move-failed"),
             OpKind::Delete => fl!("op-delete-failed"),
             OpKind::Compress => fl!("op-compress-failed"),
+            OpKind::Unpack => fl!("op-unpack-failed"),
         }
     }
 }

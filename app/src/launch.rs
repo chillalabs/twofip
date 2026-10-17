@@ -42,7 +42,7 @@ pub fn open_with_default_app(path: &Path) {
 /// Opens `path` with its default app, like [`open_with_default_app`]; a file
 /// on a server is downloaded to a local copy first (folders are skipped).
 pub fn open(path: PathBuf) -> cosmic::app::Task<crate::app::Message> {
-    if !fs_ops::vfs::is_remote(&path) {
+    if !fs_ops::vfs::is_remote(&path) && !fs_ops::archive_fs::is_inside(&path) {
         open_with_default_app(&path);
         return cosmic::app::Task::none();
     }
@@ -60,6 +60,17 @@ pub fn open(path: PathBuf) -> cosmic::app::Task<crate::app::Message> {
 pub async fn local_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut local = Vec::with_capacity(paths.len());
     for path in paths {
+        // A file inside an archive: extracted to the cache first.
+        if fs_ops::archive_fs::is_inside(&path) {
+            let inside = path.clone();
+            match tokio::task::spawn_blocking(move || fs_ops::ops::extract_to_cache(&inside)).await
+            {
+                Ok(Ok(copy)) => local.push(copy),
+                Ok(Err(err)) => eprintln!("failed to extract {}: {err}", path.display()),
+                Err(err) => eprintln!("failed to extract {}: {err}", path.display()),
+            }
+            continue;
+        }
         if !fs_ops::vfs::is_remote(&path) {
             local.push(path);
             continue;

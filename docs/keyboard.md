@@ -29,7 +29,7 @@ panel unless a dialog or a side panel is open.
 | <kbd>Tab</kbd> | Switch to the other panel |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Previous / next item |
 | <kbd>Home</kbd> / <kbd>End</kbd> | First / last item |
-| <kbd>Enter</kbd> | Open the selected file or folder |
+| <kbd>Enter</kbd> | Open the selected file or folder (archives open like folders) |
 | <kbd>→</kbd> | Enter the selected folder |
 | <kbd>Backspace</kbd>, <kbd>←</kbd> | Parent folder |
 | <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd> | Back / forward |
@@ -53,6 +53,8 @@ panel unless a dialog or a side panel is open.
 | <kbd>Alt</kbd>+<kbd>Enter</kbd> | File details |
 | <kbd>Ctrl</kbd>+<kbd>H</kbd> | Show / hide hidden files |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Refresh both panels |
+| <kbd>Alt</kbd>+<kbd>F5</kbd> | Pack the selection into an archive (in the other panel) |
+| <kbd>Alt</kbd>+<kbd>F9</kbd> | Extract the selected archives (into the other panel) |
 
 ## Tabs, views and tools
 

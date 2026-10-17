@@ -65,6 +65,13 @@ pub fn move_paths(
     cancel: CancelHandle,
     conflict: ConflictHandle,
 ) -> impl Stream<Item = OpEvent> {
+    // Out of an archive opened as a folder: extracting, then removing.
+    if sources
+        .iter()
+        .any(|source| crate::archive_fs::is_inside(source))
+    {
+        return super::archive::copy_out(sources, dest_dir, true, cancel, conflict);
+    }
     let (tx, rx) = mpsc::channel(16);
     if super::involves_server(&sources, &dest_dir) {
         tokio::spawn(crate::vfs::transfer::run_copy(

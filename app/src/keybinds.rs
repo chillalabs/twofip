@@ -40,6 +40,15 @@ pub enum Action {
     CalculateSize,
     /// Shows the selected folder's contents and recursive sizes in the other pane.
     FolderSize,
+    /// Unpacks the selected archives into the other panel (toolbar, Alt+F9).
+    Extract,
+    /// Unpacks the selected archives next to themselves (right-click).
+    ExtractHere,
+    /// Packs the selection into an archive next to it (right-click).
+    CompressHere,
+    /// Shows the folder tree beside the left panel, the right, both, or
+    /// none (in turn).
+    FolderTree,
     /// Home / End: first / last item; with Shift, extend the selection there.
     SelectFirst,
     SelectLast,
@@ -158,6 +167,11 @@ pub fn default_keybinds() -> HashMap<KeyBind, Action> {
         Action::DeletePermanently,
     );
     bind(&[], Key::Named(Named::F2), Action::Rename);
+    // Total Commander: Alt+F5 packs, Alt+F9 unpacks, with the toolbar
+    // buttons' targets (the other panel). The right-click entries have no
+    // shortcut.
+    bind(&[Modifier::Alt], Key::Named(Named::F5), Action::Compress);
+    bind(&[Modifier::Alt], Key::Named(Named::F9), Action::Extract);
     bind(&[], Key::Named(Named::F7), Action::NewFolder);
     bind(
         &[Modifier::Ctrl],

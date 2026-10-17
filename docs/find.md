@@ -24,6 +24,11 @@ active panel's folder **and all its subfolders** by name.
    **Stop** ends a long search; a search stops by itself after 1,000 results.
 3. Open a result with <kbd>Enter</kbd>, a double click, or **Go to file**: the
    panel opens its folder with the file selected.
+4. Or click **View in Listbox** to show **all the results as a tab** in the
+   active panel, like Total Commander's "Feed to listbox". Each file shows its
+   path inside the searched folder, and you can open, view, copy, move, rename
+   or delete them as in any folder. Nothing can be copied or moved into that
+   tab. Opening a folder or going up leaves the results.
 
 Keys: <kbd>Tab</kbd> or <kbd>↓</kbd> moves into the results; <kbd>↑</kbd> /
 <kbd>↓</kbd>, <kbd>Page Up</kbd> / <kbd>Page Down</kbd>, <kbd>Home</kbd> /
