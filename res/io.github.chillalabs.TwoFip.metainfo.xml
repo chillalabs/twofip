@@ -65,6 +65,18 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.11" date="2026-10-17">
+      <description>
+        <p>Opening files and a cleaner toolbar:</p>
+        <ul>
+          <li>Programs such as AppImages run when opened, instead of going to the web browser</li>
+          <li>Files whose type has no default app open the Open With list, with "Always use this app"</li>
+          <li>The selection stays when switching panels and after a refresh</li>
+          <li>Several files are packed into an archive named after their folder</li>
+          <li>Toolbar buttons are plain icons, greyed out when they can't act</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.10" date="2026-10-17">
       <description>
         <p>Archives, drives and a folder tree:</p>
