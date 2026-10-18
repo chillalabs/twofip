@@ -65,6 +65,19 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.12" date="2026-10-18">
+      <description>
+        <p>A built-in viewer, Quick View and better editing:</p>
+        <ul>
+          <li>F3 shows text, hex and images inside 2fip; big files open at once, with search</li>
+          <li>Quick View (Ctrl+Q): the other panel previews the file under the cursor; Alt+F4 quits</li>
+          <li>Choose the F4 editor in Settings; Shift+F4 creates a new file and opens it</li>
+          <li>Files edited with F4 on a server are uploaded again each time they are saved</li>
+          <li>Operations wait in a queue, with a list of what is waiting</li>
+          <li>Packing uses all processor cores for tgz, txz and 7z, and several files at once for zip</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.11" date="2026-10-17">
       <description>
         <p>Opening files and a cleaner toolbar:</p>
