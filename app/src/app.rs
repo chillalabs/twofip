@@ -113,6 +113,10 @@ pub enum Message {
     /// Apps available for the paths the "Open With" dialog was opened for.
     OpenWithLoaded(Vec<PathBuf>, Vec<AppEntry>),
     LaunchApp(usize),
+    /// "Always use this app for this type of file" in Open With.
+    OpenWithRemember(bool),
+    /// Open With for these files (e.g. their type has no default app).
+    OpenWithPaths(Vec<PathBuf>),
     CancelOpenWith,
     Launched,
     /// Time to read the drive list again.
@@ -426,6 +430,10 @@ struct OpenWithState {
     paths: Vec<PathBuf>,
     /// `None` while the installed applications are still loading.
     apps: Option<Vec<AppEntry>>,
+    /// The first file's type, for "Always use this app".
+    mime: Option<String>,
+    /// Make the chosen app the default for `mime`.
+    remember: bool,
 }
 
 struct DetailsState {
@@ -1215,11 +1223,26 @@ impl App {
                     return Task::none();
                 };
                 let paths = open_with.paths;
+                let remember = open_with.remember.then_some(open_with.mime).flatten();
                 cosmic::task::future(async move {
+                    if let Some(mime) = remember {
+                        let id = app.id.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            launch::set_default_app(&id, &mime)
+                        })
+                        .await;
+                    }
                     launch::launch(app, paths).await;
                     Message::Launched
                 })
             }
+            Message::OpenWithRemember(remember) => {
+                if let Some(open_with) = &mut self.open_with {
+                    open_with.remember = remember;
+                }
+                Task::none()
+            }
+            Message::OpenWithPaths(paths) => self.open_with_dialog_for(paths, true),
             Message::CancelOpenWith => {
                 self.open_with = None;
                 Task::none()
@@ -1931,22 +1954,7 @@ impl App {
             }
             Action::OpenWith => {
                 let paths = self.pane(self.active_pane).selected_paths();
-                let Some(first) = paths.first().cloned() else {
-                    return Task::none();
-                };
-                self.open_with = Some(OpenWithState {
-                    paths: paths.clone(),
-                    apps: None,
-                });
-                cosmic::task::future(async move {
-                    let apps = tokio::task::spawn_blocking(move || {
-                        let mime = fs_ops::mime::mime_type(&first);
-                        launch::load_apps(mime.as_deref())
-                    })
-                    .await
-                    .unwrap_or_default();
-                    Message::OpenWithLoaded(paths, apps)
-                })
+                self.open_with_dialog_for(paths, false)
             }
             Action::Cut | Action::CopyToClipboard => {
                 let paths = self.pane(self.active_pane).selected_paths();
@@ -1961,7 +1969,11 @@ impl App {
             Action::Paste => self.paste(),
             Action::Compress | Action::CompressHere => {
                 let sources = self.pane(self.active_pane).selected_paths();
-                if sources.is_empty() || sources.iter().any(|path| fs_ops::vfs::is_remote(path)) {
+                if sources.is_empty()
+                    || sources.iter().any(|path| {
+                        fs_ops::vfs::is_remote(path) || fs_ops::archive_fs::is_inside(path)
+                    })
+                {
                     return Task::none();
                 }
                 // The right-click menu packs next to the files; the toolbar
@@ -2956,6 +2968,27 @@ impl App {
         self.refresh_folder_size()
     }
 
+    /// Opens the Open With dialog for `paths` and loads the apps. `remember`
+    /// starts "Always use this app" ticked (no default app yet).
+    fn open_with_dialog_for(&mut self, paths: Vec<PathBuf>, remember: bool) -> Task<Message> {
+        let Some(first) = paths.first().cloned() else {
+            return Task::none();
+        };
+        let mime = fs_ops::mime::mime_type(&first);
+        self.open_with = Some(OpenWithState {
+            paths: paths.clone(),
+            apps: None,
+            mime: mime.clone(),
+            remember,
+        });
+        cosmic::task::future(async move {
+            let apps = tokio::task::spawn_blocking(move || launch::load_apps(mime.as_deref()))
+                .await
+                .unwrap_or_default();
+            Message::OpenWithLoaded(paths, apps)
+        })
+    }
+
     /// Shows the folder tree beside the panels the setting names.
     fn apply_folder_tree(&mut self) -> Task<Message> {
         let mode = self.settings.folder_tree;
@@ -3336,14 +3369,33 @@ impl Application for App {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Message>> {
-        let can_folder_size = self.folder_size_root().is_some();
+        let pane = self.pane(self.active_pane);
+        let current = pane.current_dir();
+        let on_server = fs_ops::vfs::is_remote(&current);
+        // The selection is in the panel's folder, so where that is says
+        // where the files are (no per-file checks on every redraw).
+        let in_archive = fs_ops::archive_fs::in_archive(&current);
+        let local_folder = !on_server && !in_archive;
+        let selected = pane.selected_paths();
+        let other = self.pane(self.active_pane.other());
+        let tools = crate::menu_bar::Tools {
+            can_find: local_folder,
+            can_folder_size: self.folder_size_root().is_some(),
+            can_pack: local_folder && !selected.is_empty(),
+            can_extract: local_folder
+                && selected
+                    .iter()
+                    .any(|path| fs_ops::ops::ArchiveFormat::of(path).is_some())
+                && !other.read_only()
+                && !fs_ops::vfs::is_remote(&other.current_dir()),
+            folder_tree: self.settings.folder_tree,
+        };
         menu_bar(
             &self.keybinds,
             self.clipboard.is_some(),
-            self.pane(self.active_pane).view_mode(),
-            fs_ops::vfs::is_remote(&self.pane(self.active_pane).current_dir()),
-            can_folder_size,
-            self.settings.folder_tree,
+            pane.view_mode(),
+            on_server,
+            tools,
         )
     }
 
@@ -3940,6 +3992,17 @@ fn open_with_dialog(state: &OpenWithState) -> Element<'_, Message> {
         }
     };
 
+    // Remembering is per type: only when the files have one.
+    let remember = state.mime.as_ref().map(|mime| {
+        widget::checkbox(state.remember)
+            .label(fl!("open-with-remember", mime = mime.clone()))
+            .on_toggle(Message::OpenWithRemember)
+    });
+    let control = widget::Column::new()
+        .spacing(12)
+        .push(control)
+        .push_maybe(remember);
+
     widget::dialog()
         .title(fl!("open-with"))
         .body(body)
@@ -4206,7 +4269,14 @@ fn default_archive_name(sources: &[PathBuf], dir: &std::path::Path) -> String {
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_else(|| tab_label(single)),
-        _ => fl!("default-archive-name"),
+        // Several items: the folder they are in, like Total Commander;
+        // "Archive" only when that has no name (e.g. `/`).
+        [first, ..] => first
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| fl!("default-archive-name")),
+        [] => fl!("default-archive-name"),
     };
     let mut name = format!("{stem}.zip");
     let mut n = 2;
@@ -4294,6 +4364,26 @@ pub(crate) fn highlight_style(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn several_items_pack_under_their_folders_name() {
+        let dir = std::env::temp_dir().join(format!("2fip-pack-name-{}", std::process::id()));
+        let photos = dir.join("Holidays");
+        std::fs::create_dir_all(&photos).unwrap();
+        let a = photos.join("a.jpg");
+        let b = photos.join("b.jpg");
+        assert_eq!(
+            default_archive_name(&[a.clone(), b], &photos),
+            "Holidays.zip"
+        );
+        assert_eq!(default_archive_name(&[a], &photos), "a.zip");
+        // Taken: numbered.
+        std::fs::write(photos.join("Holidays.zip"), b"").unwrap();
+        let c = photos.join("c.jpg");
+        let d = photos.join("d.jpg");
+        assert_eq!(default_archive_name(&[c, d], &photos), "Holidays (2).zip");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn stepping_through_options_wraps_around() {

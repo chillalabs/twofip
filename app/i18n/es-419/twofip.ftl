@@ -203,6 +203,7 @@ fkey-exit = Salir
 
 ## Diálogo Abrir con
 open-with = Abrir con
+open-with-remember = Usar siempre esta aplicación para archivos { $mime }
 open-with-one = Elige una aplicación para abrir "{ $name }".
 open-with-many = Elige una aplicación para abrir { $count } elementos.
 loading-apps = Cargando aplicaciones…

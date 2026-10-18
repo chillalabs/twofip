@@ -371,7 +371,9 @@ impl TabState {
     /// Replaces the listing with a freshly loaded one.
     pub fn set_entries(&mut self, entries: Vec<DirEntry>, options: &ListingOptions) {
         self.all_entries = entries;
-        self.entries.clear();
+        // `rebuild` notes the selection before refilling the table: clearing
+        // it here first lost the selection on every reload (e.g. the
+        // automatic one when going back to a panel).
         self.rebuild(options);
     }
 
@@ -525,6 +527,30 @@ mod tests {
             .filter_map(|e| tab.entries.item(e))
             .map(|item| tab_label(&item.path))
             .collect()
+    }
+
+    #[test]
+    fn reloading_keeps_the_selection() {
+        let entries = [
+            ("a.txt", EntryKind::File, 1),
+            ("b.txt", EntryKind::File, 1),
+            ("docs", EntryKind::Dir, 0),
+        ];
+        let mut tab = tab_with_kinds(&entries);
+        let docs = tab
+            .entries
+            .iter()
+            .find(|entity| {
+                tab.entries
+                    .item(*entity)
+                    .is_some_and(|item| item.name() == "docs")
+            })
+            .unwrap();
+        tab.select_only(docs);
+        // The same folder read again (e.g. after switching panels).
+        let again = tab_with_kinds(&entries).all_entries.clone();
+        tab.set_entries(again, &options());
+        assert_eq!(tab.selected_paths(), vec![PathBuf::from("/dir/docs")]);
     }
 
     #[test]

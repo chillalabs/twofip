@@ -42,16 +42,107 @@ pub fn open_with_default_app(path: &Path) {
 /// Opens `path` with its default app, like [`open_with_default_app`]; a file
 /// on a server is downloaded to a local copy first (folders are skipped).
 pub fn open(path: PathBuf) -> cosmic::app::Task<crate::app::Message> {
-    if !fs_ops::vfs::is_remote(&path) && !fs_ops::archive_fs::is_inside(&path) {
-        open_with_default_app(&path);
-        return cosmic::app::Task::none();
-    }
     cosmic::task::future(async move {
+        let local_file = !fs_ops::vfs::is_remote(&path) && !fs_ops::archive_fs::is_inside(&path);
+        let checked = path.clone();
+        // A program (an AppImage, a compiled binary) runs, like in Total
+        // Commander. A file whose type has no default app goes to the Open
+        // With list: xdg-open would hand it to the web browser.
+        let (program, has_default) = tokio::task::spawn_blocking(move || {
+            let program = local_file && is_program(&checked);
+            let has_default = program || has_default_app(&checked);
+            (program, has_default)
+        })
+        .await
+        .unwrap_or((false, true));
+        if program {
+            run_program(&path);
+            return crate::app::Message::Launched;
+        }
+        if !has_default {
+            return crate::app::Message::OpenWithPaths(vec![path]);
+        }
         for local in local_paths(vec![path]).await {
             open_with_default_app(&local);
         }
         crate::app::Message::Launched
     })
+}
+
+/// Whether the desktop has a default app for `path`'s type. Windows always
+/// has one (or asks by itself). Blocking: runs `xdg-mime`.
+#[cfg(unix)]
+pub fn has_default_app(path: &Path) -> bool {
+    fs_ops::mime::mime_type(path)
+        .is_none_or(|mime| mime == "inode/directory" || default_app_id(&mime).is_some())
+}
+
+#[cfg(not(unix))]
+pub fn has_default_app(_path: &Path) -> bool {
+    true
+}
+
+/// Makes `app_id` (a desktop entry id) the default app for files of type
+/// `mime`, for this and every other app (`xdg-mime default`). Blocking.
+#[cfg(unix)]
+pub fn set_default_app(app_id: &str, mime: &str) {
+    let desktop = if app_id.ends_with(".desktop") {
+        app_id.to_string()
+    } else {
+        format!("{app_id}.desktop")
+    };
+    let result = fs_ops::sandbox::host_command("xdg-mime")
+        .args(["default", &desktop, mime])
+        .status();
+    if !result.is_ok_and(|status| status.success()) {
+        eprintln!("failed to make {desktop} the default for {mime}");
+    }
+}
+
+#[cfg(not(unix))]
+pub fn set_default_app(_app_id: &str, _mime: &str) {}
+
+/// Whether `path` is a program to run: a file with the executable
+/// permission holding a native program (ELF, which includes AppImages).
+/// Scripts are left to their default app.
+#[cfg(unix)]
+pub fn is_program(path: &Path) -> bool {
+    use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return false;
+    }
+    let mut magic = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok_and(|()| magic == *b"\x7fELF")
+}
+
+/// Windows opens programs itself (ShellExecute).
+#[cfg(not(unix))]
+pub fn is_program(_path: &Path) -> bool {
+    false
+}
+
+/// Runs the program at `path` in its own folder (on the host, in the
+/// Flatpak), without waiting for it.
+pub fn run_program(path: &Path) {
+    use std::process::Stdio;
+    let folder = path.parent().unwrap_or(Path::new("/"));
+    let spawned = fs_ops::sandbox::host_command_in(path, folder)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    match spawned {
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+        }
+        Err(err) => eprintln!("failed to run {}: {err}", path.display()),
+    }
 }
 
 /// `paths` with files on a server replaced by downloaded local copies (in
@@ -609,6 +700,29 @@ fn file_uri(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn programs_are_executable_elf_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("2fip-programs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("tool.AppImage");
+        std::fs::write(&program, b"\x7fELF and the rest").unwrap();
+        let script = dir.join("run.sh");
+        std::fs::write(&script, b"#!/bin/sh\necho hi\n").unwrap();
+        for path in [&program, &script] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let not_executable = dir.join("other.AppImage");
+        std::fs::write(&not_executable, b"\x7fELF").unwrap();
+
+        assert!(is_program(&program));
+        assert!(!is_program(&script));
+        assert!(!is_program(&not_executable));
+        assert!(!is_program(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn expands_multi_file_codes_into_one_command() {

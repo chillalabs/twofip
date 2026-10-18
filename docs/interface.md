@@ -27,7 +27,9 @@ Next to the menus are the tool buttons:
 | **Pack files** (<kbd>Alt</kbd>+<kbd>F5</kbd>) | packs the selection into an archive in the other panel's folder |
 | **Extract files** (<kbd>Alt</kbd>+<kbd>F9</kbd>) | unpacks the selected archives into the other panel's folder |
 
-See [Working with files](files.html#archives) for packing and extracting.
+A button that can't act right now is greyed out: for example **Extract files**
+only works when an archive is selected. See
+[Working with files](files.html#archives) for packing and extracting.
 
 ## The two panels
 

@@ -201,6 +201,7 @@ fkey-exit = Esci
 
 ## Finestra Apri con
 open-with = Apri con
+open-with-remember = Usa sempre questa app per i file { $mime }
 open-with-one = Scegli un'applicazione per aprire «{ $name }».
 open-with-many = Scegli un'applicazione per aprire { $count } elementi.
 loading-apps = Caricamento delle applicazioni…

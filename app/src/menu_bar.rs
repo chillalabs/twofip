@@ -35,8 +35,7 @@ pub fn menu_bar<'a>(
     can_paste: bool,
     view_mode: ViewMode,
     on_server: bool,
-    can_folder_size: bool,
-    folder_tree: fs_ops::settings::TreeMode,
+    tools: Tools,
 ) -> Vec<Element<'a, Message>> {
     // Same shortcuts, re-keyed to the wrapper so the menu can show them.
     let keybinds: HashMap<KeyBind, TopMenuAction> = keybinds
@@ -165,25 +164,16 @@ pub fn menu_bar<'a>(
         .padding([0, 4]);
     // The tooltip goes below: the buttons sit at the top of the window, and
     // libcosmic's default (above) would cover the title bar.
-    let tool = |icon_name: &'static str, tooltip: String, action: Action| {
+    // Plain icon buttons, no background; one that can't act now is greyed
+    // out (disabled).
+    let tool = |icon: icon::Handle, tooltip: String, action: Action, enabled: bool| {
         themes::tooltip(
-            widget::button::icon(icon::from_name(icon_name)).on_press(Message::Action(action)),
+            widget::button::icon(icon).on_press_maybe(enabled.then_some(Message::Action(action))),
             widget::text(tooltip),
             widget::tooltip::Position::Bottom,
         )
     };
-
-    let folder_size = themes::tooltip(
-        widget::button::custom(
-            icon::from_svg_bytes(include_bytes!("../resources/icons/folder-size.svg"))
-                .symbolic(true)
-                .icon()
-                .size(18),
-        )
-        .on_press_maybe(can_folder_size.then_some(Message::Action(Action::FolderSize))),
-        widget::text(fl!("folder-size")),
-        widget::tooltip::Position::Bottom,
-    );
+    let svg = |bytes: &'static [u8]| icon::from_svg_bytes(bytes).symbolic(true);
 
     vec![
         bar.into(),
@@ -192,31 +182,62 @@ pub fn menu_bar<'a>(
             .align_y(Alignment::Center)
             .into(),
         tool(
-            "view-refresh-symbolic",
+            icon::from_name("view-refresh-symbolic").handle(),
             fl!("tooltip-refresh"),
             Action::Refresh,
+            true,
         )
         .into(),
-        tool("system-search-symbolic", fl!("tooltip-find"), Action::Find).into(),
         tool(
-            "network-server-symbolic",
+            icon::from_name("system-search-symbolic").handle(),
+            fl!("tooltip-find"),
+            Action::Find,
+            tools.can_find,
+        )
+        .into(),
+        tool(
+            icon::from_name("network-server-symbolic").handle(),
             fl!("tooltip-connections"),
             Action::Connections,
+            true,
         )
         .into(),
-        folder_size.into(),
-        svg_tool(
-            include_bytes!("../resources/icons/pack.svg"),
+        tool(
+            svg(include_bytes!("../resources/icons/folder-size.svg")),
+            fl!("folder-size"),
+            Action::FolderSize,
+            tools.can_folder_size,
+        )
+        .into(),
+        tool(
+            svg(include_bytes!("../resources/icons/pack.svg")),
             fl!("tooltip-pack"),
             Action::Compress,
-        ),
-        svg_tool(
-            include_bytes!("../resources/icons/unpack.svg"),
+            tools.can_pack,
+        )
+        .into(),
+        tool(
+            svg(include_bytes!("../resources/icons/unpack.svg")),
             fl!("tooltip-unpack"),
             Action::Extract,
-        ),
-        tree_button(folder_tree),
+            tools.can_extract,
+        )
+        .into(),
+        tree_button(tools.folder_tree),
     ]
+}
+
+/// What the toolbar buttons can do right now (the others are greyed out).
+pub struct Tools {
+    /// Find: not in server folders or archives.
+    pub can_find: bool,
+    pub can_folder_size: bool,
+    /// Pack: something selected, on this computer.
+    pub can_pack: bool,
+    /// Extract: an archive selected, and a folder in the other panel that
+    /// takes files.
+    pub can_extract: bool,
+    pub folder_tree: fs_ops::settings::TreeMode,
 }
 
 /// "Show hierarchy": its icon shows which panels have the folder tree, and
@@ -242,19 +263,8 @@ fn tree_button<'a>(mode: fs_ops::settings::TreeMode) -> Element<'a, Message> {
         ),
     };
     themes::tooltip(
-        widget::button::custom(icon::from_svg_bytes(svg).symbolic(true).icon().size(18))
+        widget::button::icon(icon::from_svg_bytes(svg).symbolic(true))
             .on_press(Message::Action(Action::FolderTree)),
-        widget::text(tooltip),
-        widget::tooltip::Position::Bottom,
-    )
-    .into()
-}
-
-/// A toolbar button with one of 2fip's own icons (drawn in the text color).
-fn svg_tool<'a>(svg: &'static [u8], tooltip: String, action: Action) -> Element<'a, Message> {
-    themes::tooltip(
-        widget::button::custom(icon::from_svg_bytes(svg).symbolic(true).icon().size(18))
-            .on_press(Message::Action(action)),
         widget::text(tooltip),
         widget::tooltip::Position::Bottom,
     )

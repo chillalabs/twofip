@@ -25,7 +25,10 @@ details.
   with <kbd>Backspace</kbd> or <kbd>←</kbd>; 2fip selects the folder you came
   from.
 - **Files:** double-click or <kbd>Enter</kbd> opens a file with its default
-  app.
+  app. If its type has **no default app yet**, 2fip shows **Open with…**
+  instead, with **Always use this app** ticked: choose the app once and that
+  type opens with it from then on (in other apps too).
+- **Programs:** an executable program, such as an **AppImage**, runs.
 - **Archives** (zip, tar, tgz, txz, 7z): double-click or <kbd>Enter</kbd>
   opens them **like a folder** (see [Archives](#archives)).
 - **<kbd>F3</kbd> View** opens the file's default app (images: the image
@@ -33,7 +36,8 @@ details.
 - **<kbd>F4</kbd> Edit** always opens the text editor (images: the image
   viewer), even for files whose default app is something else.
 - **Open with…** (right-click) lists the apps for the file's type first, then
-  all the others.
+  all the others. Tick **Always use this app** to make the choice the default
+  for that file type.
 
 ## Copying and moving
 

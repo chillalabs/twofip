@@ -201,6 +201,7 @@ fkey-exit = Quitter
 
 ## Boîte de dialogue Ouvrir avec
 open-with = Ouvrir avec
+open-with-remember = Toujours utiliser cette application pour les fichiers { $mime }
 open-with-one = Choisissez une application pour ouvrir « { $name } ».
 open-with-many = Choisissez une application pour ouvrir { $count } éléments.
 loading-apps = Chargement des applications…
