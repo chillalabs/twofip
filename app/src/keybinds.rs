@@ -59,14 +59,21 @@ pub enum Action {
     QuickFilter,
     /// Opens the default terminal in the active pane's folder.
     Terminal,
-    /// F3: opens the selected files with their default app.
+    /// F3: the built-in viewer for text and images (and files no other
+    /// app opens); other files open with their default app.
     View,
+    /// Alt+F3: always the built-in viewer (hex for binary files).
+    ViewBuiltIn,
+    /// Ctrl+Q: the other panel shows the file under the cursor.
+    QuickView,
     /// Ctrl+L: type a path into the active pane's path bar.
     EditPath,
     ListView,
     GridView,
     /// F4: opens the selected files in the text editor.
     Edit,
+    /// Shift+F4: a new empty file, opened in the text editor.
+    NewFile,
     /// Shows the active pane's next / previous tab (wrapping around).
     NextTab,
     PreviousTab,
@@ -233,6 +240,7 @@ pub fn default_keybinds() -> HashMap<KeyBind, Action> {
     );
     bind(&[], Key::Named(Named::F9), Action::Terminal);
     bind(&[], Key::Named(Named::F3), Action::View);
+    bind(&[Modifier::Alt], Key::Named(Named::F3), Action::ViewBuiltIn);
     bind(
         &[Modifier::Ctrl],
         Key::Character("l".into()),
@@ -249,6 +257,7 @@ pub fn default_keybinds() -> HashMap<KeyBind, Action> {
         Action::GridView,
     );
     bind(&[], Key::Named(Named::F4), Action::Edit);
+    bind(&[Modifier::Shift], Key::Named(Named::F4), Action::NewFile);
     // Alt+Tab belongs to the desktop's window switcher, so tabs use Ctrl+Tab
     // (as in Total Commander and web browsers).
     bind(&[Modifier::Ctrl], Key::Named(Named::Tab), Action::NextTab);
@@ -304,7 +313,12 @@ pub fn default_keybinds() -> HashMap<KeyBind, Action> {
         Key::Character("h".into()),
         Action::ToggleHiddenFiles,
     );
-    bind(&[Modifier::Ctrl], Key::Character("q".into()), Action::Quit);
+    // Ctrl+Q is Quick View, as in Total Commander (Alt+F4 quits).
+    bind(
+        &[Modifier::Ctrl],
+        Key::Character("q".into()),
+        Action::QuickView,
+    );
 
     map
 }

@@ -99,6 +99,7 @@ pub fn background_menu(
 
     let items = vec![
         button(fl!("new-folder"), "folder-new-symbolic", Action::NewFolder),
+        button(fl!("new-file"), "document-new-symbolic", Action::NewFile),
         if can_paste {
             button(fl!("paste"), "edit-paste-symbolic", Action::Paste)
         } else {

@@ -1,5 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,13 +30,14 @@ use crate::find::{FindState, FindStatus};
 use crate::fl;
 use crate::folder_size::Panel as FolderSizePanel;
 use crate::keybinds::{default_keybinds, Action};
-use crate::launch::{self, AppEntry, OpenMode};
+use crate::launch::{self, AppEntry};
 use crate::localize;
 use crate::menu_bar::menu_bar;
 use crate::operation::{OpKind, OperationState};
 use crate::pane::{home_dir, PaneMessage, PaneState, SelectMode};
 use crate::tab::{matches_filter, tab_label};
 use crate::themes;
+use crate::viewer::{Viewer, ViewerMessage};
 use crate::watcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,7 +60,8 @@ pub enum Message {
     Pane(PaneId, PaneMessage),
     /// Fired by the bottom function-key button bar; identical to the matching keybind.
     Action(Action),
-    Operation(OpEvent),
+    /// An event of the operation with this id.
+    Operation(u64, OpEvent),
     Key(Modifiers, Key),
     /// Every way of closing the app (Exit button, Ctrl+Q/Alt+F4, the window's
     /// close button, the compositor closing the window) ends here.
@@ -71,6 +74,10 @@ pub enum Message {
     ConfirmDelete,
     CancelDelete,
     CancelOperation,
+    /// Shows or hides the list of waiting operations.
+    ToggleQueue,
+    /// Takes a waiting operation out of the queue.
+    RemoveQueued(u64),
     RenameInputChanged(String),
     ConfirmRename,
     CancelRename,
@@ -83,6 +90,17 @@ pub enum Message {
     ConfirmNewFolder,
     CancelNewFolder,
     NewFolderFinished(Result<PathBuf, String>),
+    /// Shift+F4 created this file (to open in the editor).
+    NewFileFinished(Result<PathBuf, String>),
+    /// The installed text editors, for the F4 setting: (desktop id, name).
+    EditorsLoaded(Vec<(String, String)>),
+    /// Index into the F4 editor list (0 = the system's text editor).
+    EditorSelected(usize),
+    /// A file edited with F4 on a server was saved: uploaded, or not.
+    RemoteSaved(PathBuf, Result<(), String>),
+    /// No longer watching this server file for saves.
+    RemoteEditEnded(PathBuf),
+    HideNotice(u64),
     ResolveConflict(ConflictResolution),
     FavoriteNameChanged(String),
     AddFavorite,
@@ -119,6 +137,10 @@ pub enum Message {
     OpenWithPaths(Vec<PathBuf>),
     CancelOpenWith,
     Launched,
+    /// F3: show this file (the panel's files, for Next / Previous).
+    OpenViewer(PathBuf, Vec<PathBuf>),
+    Viewer(ViewerMessage),
+    QuickView(ViewerMessage),
     /// Time to read the drive list again.
     RefreshDrives,
     DrivesLoaded(Vec<fs_ops::drives::Drive>),
@@ -293,9 +315,10 @@ pub enum SettingsRow {
     IconStyle,
     FontSize,
     RowLines,
+    Editor,
 }
 
-const SETTINGS_ROWS: [SettingsRow; 9] = [
+const SETTINGS_ROWS: [SettingsRow; 10] = [
     SettingsRow::ShowHidden,
     SettingsRow::SeparateExtension,
     SettingsRow::Thumbnails,
@@ -305,6 +328,7 @@ const SETTINGS_ROWS: [SettingsRow; 9] = [
     SettingsRow::IconStyle,
     SettingsRow::FontSize,
     SettingsRow::RowLines,
+    SettingsRow::Editor,
 ];
 
 /// `index` moved by `step` (±1) within `len` options, wrapping around.
@@ -426,6 +450,18 @@ struct UnpackState {
     password_hidden: bool,
 }
 
+/// An operation's events, whatever kind of stream produces them.
+type OperationStream = Pin<Box<dyn Stream<Item = OpEvent> + Send>>;
+
+/// An operation waiting in the queue: its kind, what it works on (shown in
+/// the queue list) and how to start it.
+struct QueuedOperation {
+    id: u64,
+    kind: OpKind,
+    detail: String,
+    start: Box<dyn FnOnce(CancelHandle, ConflictHandle) -> OperationStream + Send>,
+}
+
 struct OpenWithState {
     paths: Vec<PathBuf>,
     /// `None` while the installed applications are still loading.
@@ -454,6 +490,8 @@ struct ConflictRenameState {
 
 struct NewFolderState {
     name: String,
+    /// Shift+F4: a new file instead of a folder.
+    file: bool,
 }
 
 pub struct App {
@@ -463,6 +501,12 @@ pub struct App {
     active_pane: PaneId,
     keybinds: HashMap<KeyBind, Action>,
     operation: Option<OperationState>,
+    /// Operations asked for while another one runs, started in turn.
+    queue: VecDeque<QueuedOperation>,
+    /// Whether the progress panel lists the waiting operations.
+    show_queue: bool,
+    /// The id of the last operation started.
+    last_operation_id: u64,
     /// The moment the last operation finished, to ignore inotify events that
     /// arrive just after it (their reload already happened on `Done`).
     last_op_done: Option<Instant>,
@@ -525,6 +569,17 @@ pub struct App {
     open_with: Option<OpenWithState>,
     details: Option<DetailsState>,
     folder_size: Option<FolderSizePanel>,
+    /// The installed text editors (desktop id, name), for the F4 setting.
+    editors: Vec<(String, String)>,
+    /// Server files open in an editor (F4): saves are uploaded back.
+    remote_edits: HashSet<PathBuf>,
+    /// A short message at the bottom (id, text, is an error).
+    notice: Option<(u64, String, bool)>,
+    last_notice: u64,
+    /// The F3 viewer, in place of the panels.
+    viewer: Option<Viewer>,
+    /// Quick View (Ctrl+Q): this panel shows the other one's file.
+    quick_view: Option<(PaneId, Viewer)>,
     /// The drive menus' entries (refreshed every few seconds).
     drives: Vec<fs_ops::drives::Drive>,
     settings: Settings,
@@ -614,6 +669,21 @@ impl App {
             Message::Pane(id, PaneMessage::ShowShellMenu) => {
                 self.set_active_pane(id);
                 self.show_shell_menu(id)
+            }
+            #[cfg(windows)]
+            Message::Pane(id, PaneMessage::DragOut(paths)) => {
+                self.set_active_pane(id);
+                // Files on a server or inside an archive aren't files on
+                // disk that other programs could take.
+                if paths
+                    .iter()
+                    .any(|path| fs_ops::vfs::is_remote(path) || fs_ops::archive_fs::is_inside(path))
+                {
+                    return Task::none();
+                }
+                crate::shell_drag::drag(&paths);
+                // A move into Explorer took the files away.
+                self.reload_both_panes()
             }
             Message::Pane(id, msg) => {
                 // A listing finishing its load isn't the user picking that
@@ -742,7 +812,7 @@ impl App {
                 // Text boxes swallow Escape; still let one press close the
                 // dialog they're in (e.g. Rename), the side panel (e.g. the
                 // Favorites name field), the path editor or the filter.
-                if self.dialog_open() || self.find.is_some() {
+                if self.dialog_open() || self.find.is_some() || self.viewer.is_some() {
                     return self.on_escape();
                 }
                 if self.drawer.is_some() {
@@ -811,6 +881,18 @@ impl App {
                     // handle input instead of firing global shortcuts underneath it.
                     return Task::none();
                 }
+                if let Some(viewer) = &self.viewer {
+                    // The viewer covers the panels: only its own keys, and
+                    // Quit.
+                    if let Some(message) = viewer.key(modifiers, &key) {
+                        return self.update(Message::Viewer(message));
+                    }
+                    let action = crate::keybinds::action_for(&self.keybinds, modifiers, &key);
+                    if action == Some(Action::Quit) {
+                        return self.handle_action(Action::Quit);
+                    }
+                    return Task::none();
+                }
                 if self.find.is_some() {
                     // Find Files is modal: only Ctrl+F (to close it) and
                     // Quit get past it.
@@ -852,7 +934,12 @@ impl App {
                     None => Task::none(),
                 }
             }
-            Message::Operation(event) => match event {
+            // Late events of an operation that ended (e.g. cancelled) are
+            // ignored: the next one in the queue may be running.
+            Message::Operation(id, _) if self.operation.as_ref().is_none_or(|op| op.id != id) => {
+                Task::none()
+            }
+            Message::Operation(_, event) => match event {
                 OpEvent::Progress(progress) => {
                     if let Some(op) = &mut self.operation {
                         op.current_file = Some(progress.current_file);
@@ -868,19 +955,13 @@ impl App {
                     // Start on Skip: Enter then never overwrites anything.
                     self.focus_conflict_button(CONFLICT_SKIP)
                 }
-                OpEvent::Done => {
+                OpEvent::Done | OpEvent::Cancelled => {
                     self.operation = None;
                     self.last_op_done = Some(Instant::now());
                     let reload = self.reload_both_panes();
                     let folder_size = self.refresh_folder_size();
-                    Task::batch([reload, folder_size])
-                }
-                OpEvent::Cancelled => {
-                    self.operation = None;
-                    self.last_op_done = Some(Instant::now());
-                    let reload = self.reload_both_panes();
-                    let folder_size = self.refresh_folder_size();
-                    Task::batch([reload, folder_size])
+                    let next = self.start_next_operation();
+                    Task::batch([reload, folder_size, next])
                 }
                 OpEvent::Error(err) => {
                     if let Some(op) = &mut self.operation {
@@ -893,23 +974,23 @@ impl App {
                 let Some(sources) = self.confirm_delete.take() else {
                     return Task::none();
                 };
-                if self.operation.is_some() {
-                    return Task::none();
-                }
                 if sources
                     .iter()
                     .any(|path| fs_ops::archive_fs::is_inside(path))
                 {
                     // Inside an archive: it's written again without them.
-                    self.spawn_operation(OpKind::Delete, |cancel, _| {
+                    let detail = queue_detail(&sources, None);
+                    self.spawn_operation(OpKind::Delete, detail, |cancel, _| {
                         fs_ops::ops::delete_in_archive(sources, cancel)
                     })
                 } else if self.delete_permanently {
-                    self.spawn_operation(OpKind::Delete, |cancel, _| {
+                    let detail = queue_detail(&sources, None);
+                    self.spawn_operation(OpKind::Delete, detail, |cancel, _| {
                         fs_ops::ops::delete_permanently(sources, cancel)
                     })
                 } else {
-                    self.spawn_operation(OpKind::Delete, |cancel, _| {
+                    let detail = queue_detail(&sources, None);
+                    self.spawn_operation(OpKind::Delete, detail, |cancel, _| {
                         fs_ops::ops::delete_to_trash(sources, cancel)
                     })
                 }
@@ -927,6 +1008,17 @@ impl App {
                     // cancellation, since it isn't polling `cancel` while waiting.
                     op.conflict.respond(ConflictResolution::SkipAll);
                 }
+                // Cancel (or Close after an error) ends this one only: the
+                // queue goes on.
+                let reload = self.reload_both_panes();
+                Task::batch([reload, self.start_next_operation()])
+            }
+            Message::ToggleQueue => {
+                self.show_queue = !self.show_queue;
+                Task::none()
+            }
+            Message::RemoveQueued(id) => {
+                self.queue.retain(|queued| queued.id != id);
                 Task::none()
             }
             Message::RenameInputChanged(value) => {
@@ -996,6 +1088,10 @@ impl App {
                 };
                 let parent = self.pane(self.active_pane).current_dir();
                 cosmic::task::future(async move {
+                    if new_folder.file {
+                        let result = fs_ops::ops::create_file(parent, new_folder.name).await;
+                        return Message::NewFileFinished(result);
+                    }
                     let result = fs_ops::ops::create_dir(parent, new_folder.name).await;
                     Message::NewFolderFinished(result)
                 })
@@ -1009,6 +1105,49 @@ impl App {
                     eprintln!("failed to create folder: {err}");
                 }
                 self.reload_both_panes()
+            }
+            Message::NewFileFinished(result) => {
+                let reload = self.reload_both_panes();
+                match result {
+                    Ok(path) => Task::batch([reload, self.edit_files(vec![path])]),
+                    Err(err) => Task::batch([reload, self.show_notice(err, true)]),
+                }
+            }
+            Message::EditorsLoaded(editors) => {
+                self.editors = editors;
+                Task::none()
+            }
+            Message::EditorSelected(index) => {
+                self.focus_settings_row(SettingsRow::Editor);
+                self.settings.editor = match index {
+                    0 => String::new(),
+                    index => match self.editors.get(index - 1) {
+                        Some((id, _)) => id.clone(),
+                        None => return Task::none(),
+                    },
+                };
+                self.persist_settings();
+                Task::none()
+            }
+            Message::RemoteSaved(remote, result) => {
+                let name = tab_label(&remote);
+                let reload = self.reload_both_panes();
+                let notice = match result {
+                    Ok(()) => self.show_notice(fl!("notice-uploaded", name = name), false),
+                    Err(err) => self
+                        .show_notice(fl!("notice-upload-failed", name = name, error = err), true),
+                };
+                Task::batch([reload, notice])
+            }
+            Message::RemoteEditEnded(remote) => {
+                self.remote_edits.remove(&remote);
+                Task::none()
+            }
+            Message::HideNotice(id) => {
+                if self.notice.as_ref().is_some_and(|(shown, ..)| *shown == id) {
+                    self.notice = None;
+                }
+                Task::none()
             }
             Message::ResolveConflict(resolution) => {
                 self.pending_conflict = None;
@@ -1117,10 +1256,6 @@ impl App {
                 Task::none()
             }
             Message::ConfirmPack => {
-                if self.operation.is_some() {
-                    // Keep the dialog open; the user can retry once it finishes.
-                    return Task::none();
-                }
                 let Some(pack) = self.compress.take() else {
                     return Task::none();
                 };
@@ -1145,7 +1280,8 @@ impl App {
                     move_files: pack.move_files,
                 };
                 let sources = pack.sources;
-                self.spawn_operation(OpKind::Compress, |cancel, _| {
+                let detail = queue_detail(&sources, Some(&archive));
+                self.spawn_operation(OpKind::Compress, detail, |cancel, _| {
                     fs_ops::ops::pack(sources, archive, options, cancel)
                 })
             }
@@ -1178,9 +1314,6 @@ impl App {
                 Task::none()
             }
             Message::ConfirmUnpack => {
-                if self.operation.is_some() {
-                    return Task::none();
-                }
                 let Some(unpack) = self.unpack.take() else {
                     return Task::none();
                 };
@@ -1190,7 +1323,8 @@ impl App {
                     password: (!unpack.password.is_empty()).then_some(unpack.password),
                 };
                 let (archives, dest) = (unpack.archives, unpack.dest);
-                self.spawn_operation(OpKind::Unpack, |cancel, conflict| {
+                let detail = queue_detail(&archives, Some(&dest));
+                self.spawn_operation(OpKind::Unpack, detail, |cancel, conflict| {
                     fs_ops::ops::unpack(archives, dest, options, cancel, conflict)
                 })
             }
@@ -1248,6 +1382,37 @@ impl App {
                 Task::none()
             }
             Message::Launched => Task::none(),
+            Message::OpenViewer(path, files) => {
+                let (viewer, task) = Viewer::open(path, files, false);
+                self.viewer = Some(viewer);
+                viewer_task(task, Message::Viewer)
+            }
+            Message::Viewer(message) => {
+                let Some(viewer) = &mut self.viewer else {
+                    return Task::none();
+                };
+                let (task, event) = viewer.update(message);
+                let event_task = match event {
+                    Some(crate::viewer::Event::Close) => {
+                        self.viewer = None;
+                        Task::none()
+                    }
+                    Some(crate::viewer::Event::OpenExternally(path)) => open_externally(path),
+                    None => Task::none(),
+                };
+                Task::batch([viewer_task(task, Message::Viewer), event_task])
+            }
+            Message::QuickView(message) => {
+                let Some((_, viewer)) = &mut self.quick_view else {
+                    return Task::none();
+                };
+                let (task, event) = viewer.update(message);
+                let event_task = match event {
+                    Some(crate::viewer::Event::OpenExternally(path)) => open_externally(path),
+                    _ => Task::none(),
+                };
+                Task::batch([viewer_task(task, Message::QuickView), event_task])
+            }
             Message::RefreshDrives => refresh_drives(),
             Message::DrivesLoaded(drives) => {
                 self.drives = drives;
@@ -1811,20 +1976,56 @@ impl App {
             Action::EditPath => self
                 .pane_mut(self.active_pane)
                 .update(PaneMessage::StartPathEdit),
-            Action::View | Action::Edit => {
-                let paths = self.pane(self.active_pane).selected_paths();
-                if paths.is_empty() {
+            Action::View | Action::ViewBuiltIn => {
+                let pane = self.pane(self.active_pane);
+                let Some(path) = pane
+                    .cursor_path()
+                    .into_iter()
+                    .chain(pane.selected_paths())
+                    .find(|path| !self.is_folder(path))
+                else {
+                    return Task::none();
+                };
+                let files = pane.file_paths();
+                let built_in = action == Action::ViewBuiltIn;
+                cosmic::task::future(async move {
+                    // PDFs, videos, documents… open in their own app; text,
+                    // images and files nothing else opens, in the viewer.
+                    if !built_in {
+                        if let Some(local) = launch::local_paths(vec![path.clone()]).await.pop() {
+                            let check = local.clone();
+                            let external = tokio::task::spawn_blocking(move || {
+                                crate::viewer::wants_own_app(&check)
+                            })
+                            .await
+                            .unwrap_or(false);
+                            if external {
+                                launch::open_with_default_app(&local);
+                                return Message::Launched;
+                            }
+                        }
+                    }
+                    Message::OpenViewer(path, files)
+                })
+            }
+            Action::QuickView => {
+                if self.quick_view.take().is_some() {
                     return Task::none();
                 }
-                let mode = if action == Action::View {
-                    OpenMode::View
-                } else {
-                    OpenMode::Edit
+                self.folder_size = None;
+                let target = self.active_pane.other();
+                let Some(path) = self.pane(self.active_pane).cursor_path() else {
+                    let (viewer, _) = Viewer::open(PathBuf::new(), Vec::new(), true);
+                    self.quick_view = Some((target, viewer));
+                    return Task::none();
                 };
-                cosmic::task::future(async move {
-                    launch::view_or_edit(paths, mode).await;
-                    Message::Launched
-                })
+                let (viewer, task) = Viewer::open(path, Vec::new(), true);
+                self.quick_view = Some((target, viewer));
+                viewer_task(task, Message::QuickView)
+            }
+            Action::Edit => {
+                let paths = self.pane(self.active_pane).selected_paths();
+                self.edit_files(paths)
             }
             Action::Terminal => {
                 // Inside an archive: in the folder holding the archive.
@@ -1872,6 +2073,18 @@ impl App {
             Action::NewFolder => {
                 self.new_folder = Some(NewFolderState {
                     name: fl!("new-folder-default-name"),
+                    file: false,
+                });
+                self.focus_dialog_field(0)
+            }
+            Action::NewFile => {
+                let pane = self.pane(self.active_pane);
+                if pane.read_only() || fs_ops::archive_fs::in_archive(&pane.current_dir()) {
+                    return Task::none();
+                }
+                self.new_folder = Some(NewFolderState {
+                    name: fl!("new-file-default-name"),
+                    file: true,
                 });
                 self.focus_dialog_field(0)
             }
@@ -2226,6 +2439,14 @@ impl App {
             }
             SettingsRow::Thumbnails => Message::ThumbnailsToggled(!self.settings.show_thumbnails),
             SettingsRow::RowLines => Message::RowLinesToggled(!self.settings.row_lines),
+            SettingsRow::Editor => {
+                let current = self
+                    .editors
+                    .iter()
+                    .position(|(id, _)| *id == self.settings.editor)
+                    .map_or(0, |index| index + 1);
+                Message::EditorSelected(step_index(current, step, self.editors.len() + 1))
+            }
             SettingsRow::Language => {
                 let current = localize::LANGUAGES
                     .iter()
@@ -2809,7 +3030,29 @@ impl App {
                 Message::RowLinesToggled,
             ));
 
-        widget::settings::view_column(vec![general.into(), theme.into()]).into()
+        let mut editor_names = vec![fl!("editor-system-default")];
+        editor_names.extend(self.editors.iter().map(|(_, name)| name.clone()));
+        let selected_editor = self
+            .editors
+            .iter()
+            .position(|(id, _)| *id == self.settings.editor)
+            .map_or(Some(0), |index| Some(index + 1));
+        let programs = widget::settings::section()
+            .title(fl!("settings-programs"))
+            .add(
+                self.settings_row(
+                    SettingsRow::Editor,
+                    widget::settings::item::builder(fl!("settings-editor"))
+                        .description(fl!("settings-editor-description"))
+                        .control(widget::dropdown(
+                            editor_names,
+                            selected_editor,
+                            Message::EditorSelected,
+                        )),
+                ),
+            );
+
+        widget::settings::view_column(vec![general.into(), theme.into(), programs.into()]).into()
     }
 
     /// The Favorites side panel. Its text is a step smaller than
@@ -2927,25 +3170,24 @@ impl App {
     /// copied, or moved if the drag asked for it or Shift is held. Files
     /// already in `dest`, and folders dropped into themselves, are skipped.
     fn drop_files(&mut self, dest: PathBuf, paths: Vec<PathBuf>, is_move: bool) -> Task<Message> {
-        if self.operation.is_some() {
-            return Task::none();
-        }
         let sources = drop_sources(&dest, paths);
         if sources.is_empty() {
             return Task::none();
         }
+        let detail = queue_detail(&sources, Some(&dest));
         if is_move || self.modifiers.shift() {
-            self.spawn_operation(OpKind::Move, |cancel, conflict| {
+            self.spawn_operation(OpKind::Move, detail, |cancel, conflict| {
                 fs_ops::ops::move_paths(sources, dest, cancel, conflict)
             })
         } else {
-            self.spawn_operation(OpKind::Copy, |cancel, conflict| {
+            self.spawn_operation(OpKind::Copy, detail, |cancel, conflict| {
                 fs_ops::ops::copy(sources, dest, cancel, conflict)
             })
         }
     }
 
     fn open_folder_size(&mut self) -> Task<Message> {
+        self.quick_view = None;
         if self
             .folder_size
             .as_ref()
@@ -3056,7 +3298,7 @@ impl App {
 
     fn paste_to(&mut self, dest: PathBuf) -> Task<Message> {
         // Pasting always targets the active pane: never search results.
-        if self.operation.is_some() || self.pane(self.active_pane).read_only() {
+        if self.pane(self.active_pane).read_only() {
             return Task::none();
         }
         let Some(clipboard) = &self.clipboard else {
@@ -3064,7 +3306,8 @@ impl App {
         };
         if !clipboard.cut {
             let sources = clipboard.paths.clone();
-            return self.spawn_operation(OpKind::Copy, |cancel, conflict| {
+            let detail = queue_detail(&sources, Some(&dest));
+            return self.spawn_operation(OpKind::Copy, detail, |cancel, conflict| {
                 fs_ops::ops::copy(sources, dest, cancel, conflict)
             });
         }
@@ -3080,7 +3323,8 @@ impl App {
         }
         // Cut items only move once; they're gone from their old place after.
         self.clipboard = None;
-        self.spawn_operation(OpKind::Move, |cancel, conflict| {
+        let detail = queue_detail(&sources, Some(&dest));
+        self.spawn_operation(OpKind::Move, detail, |cancel, conflict| {
             fs_ops::ops::move_paths(sources, dest, cancel, conflict)
         })
     }
@@ -3178,23 +3422,21 @@ impl App {
     }
 
     /// Starts a copy or move of the active pane's selection into the other
-    /// pane's current directory. No-ops if an operation is already running
-    /// (v1 runs at most one at a time) or nothing is selected.
+    /// pane's current directory (queued while another operation runs).
+    /// No-ops if nothing is selected.
     fn start_operation(&mut self, kind: OpKind) -> Task<Message> {
-        if self.operation.is_some() {
-            return Task::none();
-        }
         let sources = self.pane(self.active_pane).selected_paths();
         // F5/F6 can't copy or move into search results ("View in Listbox").
         if sources.is_empty() || self.pane(self.active_pane.other()).read_only() {
             return Task::none();
         }
         let dest = self.pane(self.active_pane.other()).current_dir();
+        let detail = queue_detail(&sources, Some(&dest));
         match kind {
-            OpKind::Copy => self.spawn_operation(kind, |cancel, conflict| {
+            OpKind::Copy => self.spawn_operation(kind, detail, |cancel, conflict| {
                 fs_ops::ops::copy(sources, dest, cancel, conflict)
             }),
-            OpKind::Move => self.spawn_operation(kind, |cancel, conflict| {
+            OpKind::Move => self.spawn_operation(kind, detail, |cancel, conflict| {
                 fs_ops::ops::move_paths(sources, dest, cancel, conflict)
             }),
             OpKind::Delete | OpKind::Compress | OpKind::Unpack => Task::none(),
@@ -3202,18 +3444,142 @@ impl App {
     }
 
     /// Tracks a new background operation and forwards its events to `update`.
+    /// Starts an operation, or queues it while another one runs (it starts
+    /// by itself when that one ends).
     fn spawn_operation<S>(
         &mut self,
         kind: OpKind,
-        start: impl FnOnce(CancelHandle, ConflictHandle) -> S,
+        detail: String,
+        start: impl FnOnce(CancelHandle, ConflictHandle) -> S + Send + 'static,
     ) -> Task<Message>
     where
         S: Stream<Item = OpEvent> + Send + 'static,
     {
+        self.last_operation_id += 1;
+        let queued = QueuedOperation {
+            id: self.last_operation_id,
+            kind,
+            detail,
+            start: Box::new(move |cancel, conflict| {
+                Box::pin(start(cancel, conflict)) as OperationStream
+            }),
+        };
+        self.queue.push_back(queued);
+        self.start_next_operation()
+    }
+
+    /// F4: opens `paths` in the editor. Files on a server are watched:
+    /// each save in the editor is uploaded back.
+    fn edit_files(&mut self, paths: Vec<PathBuf>) -> Task<Message> {
+        if paths.is_empty() {
+            return Task::none();
+        }
+        let editor = Some(self.settings.editor.clone()).filter(|id| !id.is_empty());
+        let mut tasks = Vec::new();
+        for remote in paths.iter().filter(|path| fs_ops::vfs::is_remote(path)) {
+            if self.remote_edits.insert(remote.clone()) {
+                tasks.push(watch_remote_edit(remote.clone()));
+            }
+        }
+        tasks.push(cosmic::task::future(async move {
+            launch::edit(paths, editor).await;
+            Message::Launched
+        }));
+        Task::batch(tasks)
+    }
+
+    /// A short message at the bottom, e.g. "Saved to the server" (red for
+    /// an error), with a button to close it.
+    fn notice_bar(&self) -> Option<Element<'_, Message>> {
+        let (id, text, error) = self.notice.as_ref()?;
+        let (id, error) = (*id, *error);
+        let row = widget::Row::new()
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .push(widget::text::body(text.clone()).width(Length::Fill))
+            .push(widget::button::standard(fl!("close")).on_press(Message::HideNotice(id)));
+        Some(
+            widget::container(row)
+                .padding([6, 14])
+                .width(Length::Fill)
+                .class(cosmic::theme::Container::custom(move |theme| {
+                    let cosmic = theme.cosmic();
+                    let background: cosmic::iced::Color = if error {
+                        cosmic.destructive_color().into()
+                    } else {
+                        cosmic.accent_color().into()
+                    };
+                    let foreground: cosmic::iced::Color = cosmic.on_accent_color().into();
+                    widget::container::Style {
+                        text_color: Some(foreground),
+                        icon_color: Some(foreground),
+                        background: Some(cosmic::iced::Background::Color(background)),
+                        ..Default::default()
+                    }
+                }))
+                .into(),
+        )
+    }
+
+    /// Shows `text` at the bottom for a few seconds.
+    fn show_notice(&mut self, text: String, error: bool) -> Task<Message> {
+        self.last_notice += 1;
+        let id = self.last_notice;
+        self.notice = Some((id, text, error));
+        cosmic::task::future(async move {
+            tokio::time::sleep(Duration::from_secs(if error { 10 } else { 4 })).await;
+            Message::HideNotice(id)
+        })
+    }
+
+    /// Quick View: shows the file under the other panel's cursor. The
+    /// panel showing it can't be the active one.
+    fn sync_quick_view(&mut self) -> Task<Message> {
+        let Some((target, _)) = &self.quick_view else {
+            return Task::none();
+        };
+        let target = *target;
+        if self.active_pane == target {
+            self.set_active_pane(target.other());
+        }
+        let cursor = self.pane(target.other()).cursor_path();
+        let Some((_, viewer)) = &mut self.quick_view else {
+            return Task::none();
+        };
+        match cursor {
+            Some(path) if path != viewer.file() => {
+                viewer_task(viewer.show(path), Message::QuickView)
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// Whether `path` is a folder (in the panel's listing, so it works on
+    /// servers and in archives too).
+    fn is_folder(&self, path: &Path) -> bool {
+        self.pane(self.active_pane).is_listed_folder(path)
+    }
+
+    /// Starts the first queued operation, if none is running.
+    fn start_next_operation(&mut self) -> Task<Message> {
+        if self.operation.is_some() {
+            return Task::none();
+        }
+        let Some(next) = self.queue.pop_front() else {
+            return Task::none();
+        };
+        let id = next.id;
         let cancel = CancelHandle::new();
         let conflict = ConflictHandle::new();
-        self.operation = Some(OperationState::new(kind, cancel.clone(), conflict.clone()));
-        cosmic::task::stream(start(cancel, conflict).map(Message::Operation))
+        self.operation = Some(OperationState::new(
+            id,
+            next.kind,
+            cancel.clone(),
+            conflict.clone(),
+        ));
+        cosmic::task::stream(
+            (next.start)(cancel, conflict).map(move |event| Message::Operation(id, event)),
+        )
     }
 }
 
@@ -3282,6 +3648,9 @@ impl Application for App {
             },
             keybinds: default_keybinds(),
             operation: None,
+            queue: VecDeque::new(),
+            show_queue: false,
+            last_operation_id: 0,
             last_op_done: None,
             watcher: None,
             confirm_delete: None,
@@ -3319,6 +3688,12 @@ impl Application for App {
             open_with: None,
             details: None,
             folder_size: None,
+            editors: Vec::new(),
+            remote_edits: HashSet::new(),
+            notice: None,
+            last_notice: 0,
+            viewer: None,
+            quick_view: None,
             drives: Vec::new(),
             settings,
             user_dirs,
@@ -3337,6 +3712,12 @@ impl Application for App {
             app.apply_color_theme()
         };
         let drives_task = refresh_drives();
+        let editors_task = cosmic::task::future(async {
+            let editors = tokio::task::spawn_blocking(launch::text_editors)
+                .await
+                .unwrap_or_default();
+            Message::EditorsLoaded(editors)
+        });
         let mut app = app;
         let tree_task = app.apply_folder_tree();
         (
@@ -3347,12 +3728,14 @@ impl Application for App {
                 theme_task,
                 drives_task,
                 tree_task,
+                editors_task,
             ]),
         )
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Message> {
         let task = self.handle_message(message);
+        let task = Task::batch([task, self.sync_quick_view()]);
         self.save_session_if_changed();
         self.close_unused_connections();
         // Keep the inotify watch set tracking the panes' current folders.
@@ -3389,6 +3772,7 @@ impl Application for App {
                 && !other.read_only()
                 && !fs_ops::vfs::is_remote(&other.current_dir()),
             folder_tree: self.settings.folder_tree,
+            quick_view: self.quick_view.is_some(),
         };
         menu_bar(
             &self.keybinds,
@@ -3442,6 +3826,9 @@ impl Application for App {
     fn on_escape(&mut self) -> Task<Message> {
         if self.favorite_alert.take().is_some() {
             return self.focus_favorite_name();
+        }
+        if !self.dialog_open() && self.viewer.take().is_some() {
+            return Task::none();
         }
         if self.rename.take().is_some() {
             return Task::none();
@@ -3630,12 +4017,23 @@ impl Application for App {
         if let Some(new_folder) = &self.new_folder {
             return Some(
                 widget::dialog()
-                    .title(fl!("new-folder"))
+                    .title(if new_folder.file {
+                        fl!("new-file")
+                    } else {
+                        fl!("new-folder")
+                    })
                     .control(
-                        widget::text_input(fl!("folder-name"), new_folder.name.as_str())
-                            .id(self.dialog_input.clone())
-                            .on_input(Message::NewFolderInputChanged)
-                            .on_submit(|_| Message::ConfirmNewFolder),
+                        widget::text_input(
+                            if new_folder.file {
+                                fl!("file-name")
+                            } else {
+                                fl!("folder-name")
+                            },
+                            new_folder.name.as_str(),
+                        )
+                        .id(self.dialog_input.clone())
+                        .on_input(Message::NewFolderInputChanged)
+                        .on_submit(|_| Message::ConfirmNewFolder),
                     )
                     .primary_action(
                         widget::button::suggested(fl!("create"))
@@ -3715,7 +4113,9 @@ impl Application for App {
     /// strong accent-colored bar (red on error) with a thick progress line,
     /// the percentage, how much is done and the current file.
     fn footer(&self) -> Option<Element<'_, Message>> {
-        let op = self.operation.as_ref()?;
+        let Some(op) = self.operation.as_ref() else {
+            return self.notice_bar();
+        };
         let failed = op.error.is_some();
         let percent = (op.fraction() * 100.0).round() as u32;
 
@@ -3767,6 +4167,14 @@ impl Application for App {
                     .width(Length::Fill)
                     .wrapping(cosmic::iced::core::text::Wrapping::None),
             )
+            .push_maybe((!self.queue.is_empty()).then(|| {
+                let arrow = if self.show_queue { "▴" } else { "▾" };
+                widget::button::standard(format!(
+                    "{}  {arrow}",
+                    fl!("op-queued", count = self.queue.len())
+                ))
+                .on_press(Message::ToggleQueue)
+            }))
             .push(
                 widget::button::standard(if failed { fl!("close") } else { fl!("cancel") })
                     .on_press(Message::CancelOperation),
@@ -3783,7 +4191,28 @@ impl Application for App {
                     }),
             );
 
-        let panel = widget::Column::new().spacing(8).push(header).push(bar);
+        let mut panel = widget::Column::new().spacing(8).push(header).push(bar);
+        if self.show_queue {
+            // The waiting operations, in the order they will run.
+            for (position, queued) in self.queue.iter().enumerate() {
+                panel = panel.push(
+                    widget::Row::new()
+                        .spacing(12)
+                        .align_y(Alignment::Center)
+                        .push(widget::text::body(format!("{}.", position + 1)))
+                        .push(widget::text::heading(queued.kind.label()))
+                        .push(
+                            widget::text::body(queued.detail.clone())
+                                .width(Length::Fill)
+                                .wrapping(cosmic::iced::core::text::Wrapping::None),
+                        )
+                        .push(
+                            widget::button::standard(fl!("op-queue-remove"))
+                                .on_press(Message::RemoveQueued(queued.id)),
+                        ),
+                );
+            }
+        }
         Some(
             widget::container(panel)
                 .padding([10, 14])
@@ -3805,11 +4234,15 @@ impl Application for App {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        if let Some(viewer) = &self.viewer {
+            return viewer.view().map(Message::Viewer);
+        }
         // How a click on a file changes the selection (Ctrl / Shift held).
         let select_mode = SelectMode::from_modifiers(self.modifiers);
         let can_paste = self.clipboard.is_some();
-        let left = match self.folder_size.as_ref() {
-            Some(panel) if panel.target == PaneId::Left => panel.view(),
+        let left = match (self.folder_size.as_ref(), self.quick_view.as_ref()) {
+            (_, Some((PaneId::Left, viewer))) => viewer.view().map(Message::QuickView),
+            (Some(panel), _) if panel.target == PaneId::Left => panel.view(),
             _ => self
                 .left
                 .view(
@@ -3821,8 +4254,9 @@ impl Application for App {
                 )
                 .map(|msg| Message::Pane(PaneId::Left, msg)),
         };
-        let right = match self.folder_size.as_ref() {
-            Some(panel) if panel.target == PaneId::Right => panel.view(),
+        let right = match (self.folder_size.as_ref(), self.quick_view.as_ref()) {
+            (_, Some((PaneId::Right, viewer))) => viewer.view().map(Message::QuickView),
+            (Some(panel), _) if panel.target == PaneId::Right => panel.view(),
             _ => self
                 .right
                 .view(
@@ -4359,6 +4793,80 @@ pub(crate) fn highlight_style(
         },
         ..Default::default()
     }
+}
+
+/// What a queued operation works on, for the queue list: "report.pdf" or
+/// "3 items", and "→ Downloads" when it has a destination.
+fn queue_detail(sources: &[PathBuf], dest: Option<&Path>) -> String {
+    let items = match sources {
+        [one] => tab_label(one),
+        _ => fl!("status-items", count = sources.len()),
+    };
+    match dest {
+        Some(dest) => format!("{items}  →  {}", tab_label(dest)),
+        None => items,
+    }
+}
+
+/// Watches the local copy of the server file `remote` while it's open in
+/// an editor (F4), and uploads it each time it's saved. Ends when the
+/// connection closes, or after a day.
+fn watch_remote_edit(remote: PathBuf) -> Task<Message> {
+    use cosmic::iced::futures::SinkExt;
+    let Some(local) = fs_ops::vfs::local_copy_path(&remote) else {
+        return Task::none();
+    };
+    let stream = cosmic::iced::stream::channel(4, async move |mut output| {
+        let modified = |path: &Path| {
+            std::fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        };
+        // The download runs at the same time: its result is the starting point.
+        let mut seen = None;
+        for _ in 0..(24 * 60 * 60 / 2) {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            if !fs_ops::vfs::is_connected(&remote) {
+                break;
+            }
+            let now = modified(&local);
+            if seen.is_none() {
+                seen = now;
+                continue;
+            }
+            if now.is_none() || now == seen {
+                continue;
+            }
+            // Wait until the editor has finished writing.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            seen = modified(&local);
+            let result = fs_ops::vfs::upload(&local, &remote, &mut |_| {}, &|| false).await;
+            let _ = output
+                .send(Message::RemoteSaved(remote.clone(), result))
+                .await;
+        }
+        let _ = output.send(Message::RemoteEditEnded(remote)).await;
+    });
+    cosmic::task::stream(stream)
+}
+
+/// A viewer's task, as one of the app's.
+fn viewer_task(
+    task: cosmic::Task<ViewerMessage>,
+    wrap: fn(ViewerMessage) -> Message,
+) -> Task<Message> {
+    task.map(move |message| cosmic::Action::App(wrap(message)))
+}
+
+/// "Open with default app" from the viewer (a local copy for files on a
+/// server or in an archive).
+fn open_externally(path: PathBuf) -> Task<Message> {
+    cosmic::task::future(async move {
+        if let Some(local) = launch::local_paths(vec![path]).await.pop() {
+            launch::open_with_default_app(&local);
+        }
+        Message::Launched
+    })
 }
 
 #[cfg(test)]

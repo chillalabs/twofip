@@ -12,6 +12,9 @@ desktop, inspired by Total Commander and COSMIC Files. Written in Rust with
   list/grid view; tabs, folders and the active panel are restored on the next start.
 - **Classic function keys**: F2 rename, F3 view, F4 edit, F5 copy, F6 move,
   F7 new folder, F8 delete (to the trash), F9 terminal.
+- **Built-in viewer** (F3, like Total Commander's Lister): text, hex and
+  images, big files in an instant, search; **Quick View** (Ctrl+Q) previews the
+  file under the cursor in the other panel.
 - **Copy, move, delete and compress in the background**, with a progress panel,
   cancel, and a "file already exists" prompt (replace / skip, for one or all).
 - **List view** with Name, Ext, Size and Modified columns (the extension can also
@@ -72,7 +75,8 @@ desktop, inspired by Total Commander and COSMIC Files. Written in Rust with
 | F1 | Help (the online user's guide) |
 | Alt+Enter | File details |
 | Ctrl+, | Settings |
-| Ctrl+Q, Alt+F4 | Quit |
+| Ctrl+Q | Quick View: the other panel previews the file under the cursor |
+| Alt+F4 | Quit |
 
 ## Install with Flatpak
 

@@ -50,7 +50,23 @@ pub fn show(paths: &[PathBuf]) -> Option<Action> {
 }
 
 /// Absolute item ids, freed on drop.
-struct Pidls(Vec<*mut ITEMIDLIST>);
+pub(crate) struct Pidls(pub(crate) Vec<*mut ITEMIDLIST>);
+
+impl Pidls {
+    /// The shell's ids for `paths`.
+    pub(crate) unsafe fn parse(paths: &[PathBuf]) -> windows::core::Result<Self> {
+        let mut pidls = Pidls(Vec::new());
+        for path in paths {
+            let mut pidl = std::ptr::null_mut();
+            // SAFETY: the path string outlives the call; the id is freed on drop.
+            unsafe {
+                SHParseDisplayName(&HSTRING::from(path.as_os_str()), None, &mut pidl, 0, None)?
+            };
+            pidls.0.push(pidl);
+        }
+        Ok(pidls)
+    }
+}
 
 impl Drop for Pidls {
     fn drop(&mut self) {
@@ -66,12 +82,7 @@ unsafe fn show_menu(paths: &[PathBuf]) -> windows::core::Result<Option<Action>> 
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let hwnd = GetForegroundWindow();
 
-        let mut pidls = Pidls(Vec::new());
-        for path in paths {
-            let mut pidl = std::ptr::null_mut();
-            SHParseDisplayName(&HSTRING::from(path.as_os_str()), None, &mut pidl, 0, None)?;
-            pidls.0.push(pidl);
-        }
+        let pidls = Pidls::parse(paths)?;
         let Some(&first) = pidls.0.first() else {
             return Ok(None);
         };

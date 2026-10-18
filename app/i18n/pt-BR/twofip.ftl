@@ -51,6 +51,8 @@ op-progress = { $operation } { $percent }%
 op-files-done = { $done } de { $total } arquivos
 op-bytes-done = { $done } de { $total }
 op-preparing = Preparando…
+op-queued = { $count } aguardando
+op-queue-remove = Remover
 close = Fechar
 cancel = Cancelar
 
@@ -319,3 +321,36 @@ connect-name = Nome (opcional)
 connect-password-stored = Salva no chaveiro (digite para alterar)
 connect-save = Salvar em Conexões
 connect-remember-password = Lembrar a senha no chaveiro do sistema
+
+# Visualizador F3 e Visualização rápida (Ctrl+Q)
+quick-view = Visualização rápida
+viewer-loading = Carregando…
+viewer-unreadable = Não é possível ler este arquivo.
+viewer-folder = Isto é uma pasta.
+viewer-previous = Arquivo anterior (P)
+viewer-next = Próximo arquivo (N)
+viewer-text = Texto
+viewer-hex = Hex
+viewer-image = Imagem
+viewer-zoom-out = Diminuir zoom (−)
+viewer-zoom-fit = Ajustar à janela (0)
+viewer-zoom-in = Aumentar zoom (+)
+viewer-wrap = Quebrar linhas
+viewer-find = Localizar
+viewer-find-previous = Localizar anterior (Shift+F3)
+viewer-find-next = Localizar próximo (F3)
+viewer-searching = Procurando…
+viewer-not-found = Não encontrado
+viewer-open-externally = Abrir com o aplicativo padrão
+viewer-close = Fechar (Esc)
+
+# F4: editor choice, Shift+F4, editing files on servers
+new-file = Novo arquivo
+new-file-default-name = Novo arquivo.txt
+file-name = Nome do arquivo
+settings-programs = Programas
+settings-editor = Editor (F4)
+settings-editor-description = O aplicativo em que o F4 abre os arquivos. Arquivos em um servidor são enviados de novo cada vez que você salva.
+editor-system-default = Editor de texto do sistema
+notice-uploaded = { $name } foi salvo no servidor.
+notice-upload-failed = Não foi possível salvar { $name } no servidor: { $error }

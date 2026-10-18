@@ -38,6 +38,8 @@ impl OpKind {
 }
 
 pub struct OperationState {
+    /// Tells this operation's events from late ones of an earlier one.
+    pub id: u64,
     pub kind: OpKind,
     pub cancel: CancelHandle,
     /// Unused for `Delete`/`Compress` (nothing to collide with), but
@@ -52,8 +54,9 @@ pub struct OperationState {
 }
 
 impl OperationState {
-    pub fn new(kind: OpKind, cancel: CancelHandle, conflict: ConflictHandle) -> Self {
+    pub fn new(id: u64, kind: OpKind, cancel: CancelHandle, conflict: ConflictHandle) -> Self {
         Self {
+            id,
             kind,
             cancel,
             conflict,

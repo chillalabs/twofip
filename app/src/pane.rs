@@ -94,6 +94,10 @@ pub enum PaneMessage {
     /// Windows: right button released over a file, show Explorer's menu
     /// for the selection. Handled by the app.
     ShowShellMenu,
+    /// Windows: a drag of these files started; Windows' own drag and drop
+    /// takes it from here. Handled by the app.
+    #[cfg(windows)]
+    DragOut(Vec<PathBuf>),
     /// Opens or closes a folder in the folder tree.
     TreeToggle(PathBuf),
     /// A folder's subfolders, read for the folder tree.
@@ -402,6 +406,8 @@ impl PaneState {
             | PaneMessage::ShowShellMenu
             | PaneMessage::MountDrive(_)
             | PaneMessage::EjectDrive(_) => Task::none(),
+            #[cfg(windows)]
+            PaneMessage::DragOut(_) => Task::none(),
             PaneMessage::TreeToggle(dir) => {
                 let load = self.tree.as_mut().and_then(|tree| tree.toggle(dir));
                 load.map_or_else(Task::none, |dir| self.load_tree(dir))
@@ -1036,6 +1042,19 @@ impl PaneState {
         self.path_edit.is_some()
     }
 
+    /// The entry under the keyboard cursor in the active tab.
+    pub fn cursor_path(&self) -> Option<PathBuf> {
+        self.tabs.active_data::<TabState>()?.cursor_path()
+    }
+
+    /// The active tab's files, in the listing's order.
+    pub fn file_paths(&self) -> Vec<PathBuf> {
+        self.tabs
+            .active_data::<TabState>()
+            .map(TabState::file_paths)
+            .unwrap_or_default()
+    }
+
     /// Paths of the items selected in the active tab's file listing.
     pub fn selected_paths(&self) -> Vec<PathBuf> {
         let Some(tab_state) = self.tabs.active_data::<TabState>() else {
@@ -1047,6 +1066,19 @@ impl PaneState {
             .filter_map(|entity| tab_state.entries.item(entity))
             .map(|item| item.path.clone())
             .collect()
+    }
+
+    /// Whether `path` is listed in the active tab as a folder.
+    pub fn is_listed_folder(&self, path: &Path) -> bool {
+        self.tabs
+            .active_data::<TabState>()
+            .is_some_and(|tab_state| {
+                tab_state
+                    .entries
+                    .iter()
+                    .filter_map(|entity| tab_state.entries.item(entity))
+                    .any(|item| item.path == path && item.is_dir())
+            })
     }
 
     /// The single selected item's path, if exactly one directory is selected.
@@ -1974,11 +2006,16 @@ fn draggable_entry<'a>(
     let picture = pane.item_icon(item);
     let name = item.name().to_string();
     let count = dragged.len();
+    // libcosmic has no drag and drop on Windows yet: Windows runs the drag.
+    #[cfg(windows)]
+    let drag_out = PaneMessage::DragOut(dragged.clone());
     let source = widget::dnd_source::<PaneMessage, FileList>(entry)
         .drag_content(move || FileList(dragged.clone()))
         .drag_icon(move |grab_offset| {
             drag_picture(look, picture.clone(), &name, count, grab_offset)
         });
+    #[cfg(windows)]
+    let source = source.on_start(Some(drag_out));
     if item.is_dir() && !tab_read_only(tab_state) {
         drop_target(source, item.path.clone(), true)
     } else {

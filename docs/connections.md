@@ -49,9 +49,10 @@ for example `sftp://me@example.com/home/me`.
 - **Rename** (<kbd>F2</kbd>), **new folder** (<kbd>F7</kbd>) and **delete**
   work as usual. Deleting on a server is always **permanent**.
 - **Opening a file** (<kbd>Enter</kbd>, <kbd>F3</kbd>, <kbd>F4</kbd>, Open
-  with…) downloads a copy to `~/.cache/2fip/remote/` and opens that. Changes
-  to the copy are **not** uploaded back: copy the file to the server again
-  when you're done.
+  with…) downloads a copy to `~/.cache/2fip/remote/` and opens that.
+- **Editing with <kbd>F4</kbd>:** each time you save in the editor, 2fip
+  uploads the file back to the server (while the connection is open). Changes
+  made through <kbd>Enter</kbd> or Open with… stay in the local copy.
 - Not available on servers yet: thumbnails, folder sizes, Find files, Details
   and Compress.
 

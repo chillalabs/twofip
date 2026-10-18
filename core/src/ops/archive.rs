@@ -3,8 +3,10 @@
 //! and 7z. All pure Rust, so they behave the same everywhere. Zip and 7z
 //! can be encrypted with a password (AES-256).
 
+use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Cursor, Read, Write};
+use std::num::NonZeroU64;
 use std::path::{Component, Path, PathBuf};
 
 use tokio::sync::mpsc;
@@ -162,8 +164,8 @@ fn pack_blocking(
         ArchiveFormat::Tar => write_tar(BufWriter::new(file), &entries, cancel, &mut progress)
             .and_then(|writer| finish(writer.into_inner().map_err(|err| err.into_error()))),
         ArchiveFormat::Tgz => {
-            let gz =
-                flate2::write::GzEncoder::new(BufWriter::new(file), flate2::Compression::default());
+            let gz = ParallelGzWriter::new(BufWriter::new(file))
+                .map_err(|err| io_error(archive, err))?;
             write_tar(gz, &entries, cancel, &mut progress).and_then(|gz| finish(gz.finish()))
         }
         ArchiveFormat::Txz => {
@@ -171,8 +173,8 @@ fn pack_blocking(
             write_tar(xz, &entries, cancel, &mut progress).and_then(|xz| finish(xz.finish()))
         }
         ArchiveFormat::Gz => {
-            let gz =
-                flate2::write::GzEncoder::new(BufWriter::new(file), flate2::Compression::default());
+            let gz = ParallelGzWriter::new(BufWriter::new(file))
+                .map_err(|err| io_error(archive, err))?;
             write_single(gz, &entries[0], cancel, &mut progress).and_then(|gz| finish(gz.finish()))
         }
         ArchiveFormat::Xz => {
@@ -247,9 +249,151 @@ fn finish<W: Write>(writer: std::io::Result<W>) -> Result<(), OpEvent> {
         .map_err(|err| OpEvent::Error(format!("failed to finish the archive: {err}")))
 }
 
-fn xz_writer<W: Write>(inner: W) -> Result<lzma_rust2::XzWriter<W>, OpEvent> {
-    lzma_rust2::XzWriter::new(inner, lzma_rust2::XzOptions::with_preset(6))
+/// How many cores packing uses.
+fn threads() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(16)
+}
+
+/// xz and 7z cut the data in blocks this big and compress them on all
+/// cores at once (a little less compression than one long block).
+const LZMA_BLOCK: u64 = 16 * 1024 * 1024;
+
+fn xz_writer<W: Write>(inner: W) -> Result<lzma_rust2::XzWriterMt<W>, OpEvent> {
+    let mut options = lzma_rust2::XzOptions::with_preset(6);
+    options.set_block_size(NonZeroU64::new(LZMA_BLOCK));
+    lzma_rust2::XzWriterMt::new(inner, options, threads() as u32)
         .map_err(|err| OpEvent::Error(format!("failed to start xz compression: {err}")))
+}
+
+/// gzip piece size: each piece is compressed on its own core.
+const GZ_PIECE: usize = 1024 * 1024;
+
+/// gzip on all cores, the way pigz does it: the data is cut in 1 MiB
+/// pieces, each deflated on its own thread and ended with a sync flush, so
+/// the pieces join into one ordinary gzip stream any tool can read.
+struct ParallelGzWriter<W: Write> {
+    inner: W,
+    piece: Vec<u8>,
+    crc: flate2::Crc,
+    /// Pieces being compressed, oldest first: written in this order.
+    pending: VecDeque<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>,
+    threads: usize,
+}
+
+impl<W: Write> ParallelGzWriter<W> {
+    fn new(mut inner: W) -> std::io::Result<Self> {
+        // Magic, deflate, no flags, no time, no extra flags, unknown OS.
+        inner.write_all(&[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255])?;
+        Ok(Self {
+            inner,
+            piece: Vec::with_capacity(GZ_PIECE),
+            crc: flate2::Crc::new(),
+            pending: VecDeque::new(),
+            threads: threads(),
+        })
+    }
+
+    fn send(&mut self, last: bool) -> std::io::Result<()> {
+        while self.pending.len() >= self.threads {
+            self.write_oldest()?;
+        }
+        let piece = std::mem::replace(&mut self.piece, Vec::with_capacity(GZ_PIECE));
+        self.pending
+            .push_back(std::thread::spawn(move || deflate_piece(&piece, last)));
+        Ok(())
+    }
+
+    fn write_oldest(&mut self) -> std::io::Result<()> {
+        if let Some(piece) = self.pending.pop_front() {
+            let compressed = piece
+                .join()
+                .map_err(|_| std::io::Error::other("gzip compression stopped"))??;
+            self.inner.write_all(&compressed)?;
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> std::io::Result<W> {
+        self.send(true)?;
+        while !self.pending.is_empty() {
+            self.write_oldest()?;
+        }
+        self.inner.write_all(&self.crc.sum().to_le_bytes())?;
+        self.inner.write_all(&self.crc.amount().to_le_bytes())?;
+        Ok(self.inner)
+    }
+}
+
+impl<W: Write> Write for ParallelGzWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let take = buf.len().min(GZ_PIECE - self.piece.len());
+        self.piece.extend_from_slice(&buf[..take]);
+        self.crc.update(&buf[..take]);
+        if self.piece.len() == GZ_PIECE {
+            self.send(false)?;
+        }
+        Ok(take)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// One gzip piece as raw deflate: the last one ends the stream, the others
+/// end on a byte boundary (sync flush) so the next piece can follow.
+fn deflate_piece(input: &[u8], last: bool) -> std::io::Result<Vec<u8>> {
+    use flate2::{Compress, Compression, FlushCompress, Status};
+    let mut deflate = Compress::new(Compression::default(), false);
+    let flush = if last {
+        FlushCompress::Finish
+    } else {
+        FlushCompress::Sync
+    };
+    let mut out = Vec::with_capacity(input.len() / 2 + 4096);
+    loop {
+        let read = deflate.total_in() as usize;
+        let status = deflate
+            .compress_vec(&input[read..], &mut out, flush)
+            .map_err(std::io::Error::other)?;
+        let done = if last {
+            status == Status::StreamEnd
+        } else {
+            deflate.total_in() as usize == input.len() && out.len() < out.capacity()
+        };
+        if done {
+            return Ok(out);
+        }
+        out.reserve(out.capacity().max(4096));
+    }
+}
+
+/// Zip files up to this size are compressed on all cores at once, each in
+/// memory; bigger ones are streamed into the archive as before.
+const ZIP_IN_MEMORY: u64 = 32 * 1024 * 1024;
+
+/// A zip entry on its way into the archive, in archive order.
+enum ZipJob<'a, 'scope> {
+    /// Written by the main thread: folders, links, big files.
+    Direct(&'a ArchiveEntry),
+    /// Compressed on its own thread into a one-entry zip in memory.
+    Packed(
+        &'a ArchiveEntry,
+        std::thread::ScopedJoinHandle<'scope, zip::result::ZipResult<Vec<u8>>>,
+    ),
+}
+
+/// One file as a one-entry zip in memory, to be copied into the archive.
+fn zip_in_memory(
+    entry: &ArchiveEntry,
+    options: zip::write::FileOptions<'_, ()>,
+) -> zip::result::ZipResult<Vec<u8>> {
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    zip.start_file(entry.name.as_str(), options)?;
+    std::io::copy(&mut File::open(&entry.src)?, &mut zip)?;
+    Ok(zip.finish()?.into_inner())
 }
 
 fn write_zip(
@@ -259,35 +403,93 @@ fn write_zip(
     cancel: &CancelHandle,
     progress: &mut Progress,
 ) -> Result<(), OpEvent> {
-    use zip::write::SimpleFileOptions;
-    let mut zip = zip::ZipWriter::new(BufWriter::new(file));
-    for entry in entries {
-        if cancel.is_cancelled() {
-            return Err(OpEvent::Cancelled);
-        }
-        let mut file_options = SimpleFileOptions::default()
+    let password = options.password.as_deref().filter(|p| !p.is_empty());
+    let file_options = |entry: &ArchiveEntry| {
+        let options = zip::write::FileOptions::<()>::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .unix_permissions(entry.mode & 0o7777)
             .large_file(entry.size >= u32::MAX as u64);
-        if let Some(password) = options.password.as_deref().filter(|p| !p.is_empty()) {
-            file_options = file_options.with_aes_encryption(zip::AesMode::Aes256, password);
+        match password {
+            Some(password) => options.with_aes_encryption(zip::AesMode::Aes256, password),
+            None => options,
         }
-        match &entry.kind {
-            ArchiveEntryKind::Dir => zip
-                .add_directory(entry.name.as_str(), file_options)
-                .map_err(|err| io_error(&entry.src, err))?,
-            ArchiveEntryKind::Symlink(target) => zip
-                .add_symlink(entry.name.as_str(), target.to_string_lossy(), file_options)
-                .map_err(|err| io_error(&entry.src, err))?,
-            ArchiveEntryKind::File => {
-                zip.start_file(entry.name.as_str(), file_options)
-                    .map_err(|err| io_error(&entry.src, err))?;
-                let mut src = File::open(&entry.src).map_err(|err| io_error(&entry.src, err))?;
-                std::io::copy(&mut src, &mut zip).map_err(|err| io_error(&entry.src, err))?;
+    };
+    let mut zip = zip::ZipWriter::new(BufWriter::new(file));
+    let threads = threads();
+    std::thread::scope(|scope| {
+        let mut write = |job: ZipJob| -> Result<(), OpEvent> {
+            let entry = match job {
+                ZipJob::Direct(entry) => {
+                    let options = file_options(entry);
+                    match &entry.kind {
+                        ArchiveEntryKind::Dir => zip
+                            .add_directory(entry.name.as_str(), options)
+                            .map_err(|err| io_error(&entry.src, err))?,
+                        ArchiveEntryKind::Symlink(target) => zip
+                            .add_symlink(entry.name.as_str(), target.to_string_lossy(), options)
+                            .map_err(|err| io_error(&entry.src, err))?,
+                        ArchiveEntryKind::File => {
+                            zip.start_file(entry.name.as_str(), options)
+                                .map_err(|err| io_error(&entry.src, err))?;
+                            let mut src =
+                                File::open(&entry.src).map_err(|err| io_error(&entry.src, err))?;
+                            copy_cancellable(&mut src, &mut zip, cancel).map_err(
+                                |stop| match stop {
+                                    CopyStop::Cancelled => OpEvent::Cancelled,
+                                    CopyStop::Io(err) => io_error(&entry.src, err),
+                                },
+                            )?;
+                        }
+                    }
+                    entry
+                }
+                ZipJob::Packed(entry, packing) => {
+                    let packed = packing
+                        .join()
+                        .map_err(|_| io_error(&entry.src, "compression stopped"))?
+                        .map_err(|err| io_error(&entry.src, err))?;
+                    let mut one = zip::ZipArchive::new(Cursor::new(packed))
+                        .map_err(|err| io_error(&entry.src, err))?;
+                    let raw = one
+                        .by_index_raw(0)
+                        .map_err(|err| io_error(&entry.src, err))?;
+                    zip.raw_copy_file(raw)
+                        .map_err(|err| io_error(&entry.src, err))?;
+                    entry
+                }
+            };
+            progress.done(&entry.src, entry.size);
+            Ok(())
+        };
+        // Up to `threads` files are compressed at once while the oldest
+        // one is written.
+        let mut queue = VecDeque::new();
+        for entry in entries {
+            if cancel.is_cancelled() {
+                return Err(OpEvent::Cancelled);
+            }
+            let job = if matches!(entry.kind, ArchiveEntryKind::File) && entry.size <= ZIP_IN_MEMORY
+            {
+                let options = file_options(entry);
+                ZipJob::Packed(entry, scope.spawn(move || zip_in_memory(entry, options)))
+            } else {
+                ZipJob::Direct(entry)
+            };
+            queue.push_back(job);
+            while queue.len() > threads {
+                if let Some(job) = queue.pop_front() {
+                    write(job)?;
+                }
             }
         }
-        progress.done(&entry.src, entry.size);
-    }
+        while let Some(job) = queue.pop_front() {
+            if cancel.is_cancelled() {
+                return Err(OpEvent::Cancelled);
+            }
+            write(job)?;
+        }
+        Ok(())
+    })?;
     let writer = zip
         .finish()
         .map_err(|err| OpEvent::Error(format!("failed to finish the archive: {err}")))?;
@@ -339,16 +541,20 @@ fn write_7z(
     cancel: &CancelHandle,
     progress: &mut Progress,
 ) -> Result<(), OpEvent> {
-    use sevenz_rust2::encoder_options::AesEncoderOptions;
-    use sevenz_rust2::{ArchiveEntry as SevenEntry, ArchiveWriter, EncoderMethod, Password};
+    use sevenz_rust2::encoder_options::{AesEncoderOptions, Lzma2Options};
+    use sevenz_rust2::{ArchiveEntry as SevenEntry, ArchiveWriter, EncoderConfiguration, Password};
     let error = |err: sevenz_rust2::Error| OpEvent::Error(format!("failed to pack: {err}"));
     let mut seven = ArchiveWriter::new(file).map_err(error)?;
-    if let Some(password) = options.password.as_deref().filter(|p| !p.is_empty()) {
-        seven.set_content_methods(vec![
+    // LZMA2 on all cores (for files bigger than one block).
+    let lzma2: EncoderConfiguration =
+        Lzma2Options::from_level_mt(6, threads() as u32, LZMA_BLOCK).into();
+    match options.password.as_deref().filter(|p| !p.is_empty()) {
+        Some(password) => seven.set_content_methods(vec![
             AesEncoderOptions::new(Password::new(password)).into(),
-            EncoderMethod::LZMA2.into(),
-        ]);
-    }
+            lzma2,
+        ]),
+        None => seven.set_content_methods(vec![lzma2]),
+    };
     for entry in entries {
         if cancel.is_cancelled() {
             return Err(OpEvent::Cancelled);
@@ -1113,6 +1319,27 @@ mod tests {
         assert!(matches!(events.last(), Some(OpEvent::Done)), "{events:?}");
         assert!(archive.exists());
         assert!(sources.iter().all(|source| !source.exists()));
+    }
+
+    #[test]
+    fn parallel_gzip_is_one_ordinary_gzip_stream() {
+        // Several pieces, the last one partial, of mixed compressible data.
+        let data: Vec<u8> = (0..(GZ_PIECE * 3 + 12345) as u32)
+            .map(|i| {
+                (i.wrapping_mul(2654435761) >> 24) as u8 & if i % 7 == 0 { 0xff } else { 0x0f }
+            })
+            .collect();
+        let mut gz = ParallelGzWriter::new(Vec::new()).unwrap();
+        for part in data.chunks(100_000) {
+            gz.write_all(part).unwrap();
+        }
+        let compressed = gz.finish().unwrap();
+        // A single-member decoder reads it all.
+        let mut back = Vec::new();
+        flate2::read::GzDecoder::new(compressed.as_slice())
+            .read_to_end(&mut back)
+            .unwrap();
+        assert_eq!(back, data);
     }
 
     #[tokio::test]

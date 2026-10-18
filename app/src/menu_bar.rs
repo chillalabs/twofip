@@ -55,6 +55,7 @@ pub fn menu_bar<'a>(
     let file = vec![
         button(fl!("new-tab"), "tab-new-symbolic", Action::NewTab),
         button(fl!("new-folder"), "folder-new-symbolic", Action::NewFolder),
+        button(fl!("new-file"), "document-new-symbolic", Action::NewFile),
         MenuItem::Divider,
         button(
             fl!("connect-to-server"),
@@ -133,6 +134,12 @@ pub fn menu_bar<'a>(
             "view-grid-symbolic",
             view_mode == ViewMode::Grid,
             Action::GridView,
+        ),
+        check(
+            fl!("quick-view"),
+            "view-dual-symbolic",
+            tools.quick_view,
+            Action::QuickView,
         ),
         MenuItem::Divider,
         button(fl!("favorites"), "starred-symbolic", Action::Favorites),
@@ -238,6 +245,7 @@ pub struct Tools {
     /// takes files.
     pub can_extract: bool,
     pub folder_tree: fs_ops::settings::TreeMode,
+    pub quick_view: bool,
 }
 
 /// "Show hierarchy": its icon shows which panels have the folder tree, and

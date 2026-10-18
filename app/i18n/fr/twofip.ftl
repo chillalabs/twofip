@@ -49,6 +49,8 @@ op-progress = { $operation } { $percent } %
 op-files-done = { $done } sur { $total } fichiers
 op-bytes-done = { $done } sur { $total }
 op-preparing = Préparation…
+op-queued = { $count } en attente
+op-queue-remove = Retirer
 close = Fermer
 cancel = Annuler
 
@@ -317,3 +319,36 @@ connect-name = Nom (facultatif)
 connect-password-stored = Enregistré dans le trousseau (saisir pour le changer)
 connect-save = Enregistrer dans Connexions
 connect-remember-password = Retenir le mot de passe dans le trousseau du système
+
+# Visionneuse F3 et Aperçu rapide (Ctrl+Q)
+quick-view = Aperçu rapide
+viewer-loading = Chargement…
+viewer-unreadable = Impossible de lire ce fichier.
+viewer-folder = C'est un dossier.
+viewer-previous = Fichier précédent (P)
+viewer-next = Fichier suivant (N)
+viewer-text = Texte
+viewer-hex = Hexa
+viewer-image = Image
+viewer-zoom-out = Zoom arrière (−)
+viewer-zoom-fit = Ajuster à la fenêtre (0)
+viewer-zoom-in = Zoom avant (+)
+viewer-wrap = Retour à la ligne
+viewer-find = Rechercher
+viewer-find-previous = Précédent (Maj+F3)
+viewer-find-next = Suivant (F3)
+viewer-searching = Recherche…
+viewer-not-found = Introuvable
+viewer-open-externally = Ouvrir avec l'application par défaut
+viewer-close = Fermer (Échap)
+
+# F4: editor choice, Shift+F4, editing files on servers
+new-file = Nouveau fichier
+new-file-default-name = Nouveau fichier.txt
+file-name = Nom du fichier
+settings-programs = Programmes
+settings-editor = Éditeur (F4)
+settings-editor-description = L'application dans laquelle F4 ouvre les fichiers. Les fichiers sur un serveur y sont renvoyés à chaque enregistrement.
+editor-system-default = Éditeur de texte du système
+notice-uploaded = { $name } a été enregistré sur le serveur.
+notice-upload-failed = Impossible d'enregistrer { $name } sur le serveur : { $error }

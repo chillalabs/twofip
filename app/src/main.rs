@@ -17,9 +17,12 @@ mod menu_bar;
 mod operation;
 mod pane;
 #[cfg(windows)]
+mod shell_drag;
+#[cfg(windows)]
 mod shell_menu;
 mod tab;
 mod themes;
+mod viewer;
 mod watcher;
 #[cfg(windows)]
 mod windows;

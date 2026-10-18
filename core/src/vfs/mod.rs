@@ -593,6 +593,24 @@ pub async fn download(
     })
 }
 
+/// Where [`local_copy`] puts the copy of the remote file `path` (`None` for
+/// local paths).
+pub fn local_copy_path(path: &Path) -> Option<PathBuf> {
+    let location = RemoteLocation::parse(path)?;
+    let server = format!(
+        "{}-{}-{}",
+        location.protocol.scheme(),
+        location.host,
+        location.port
+    );
+    Some(
+        crate::sandbox::cache_home()
+            .join("2fip/remote")
+            .join(server)
+            .join(location.path.trim_start_matches('/')),
+    )
+}
+
 /// Uploads the local file `local` to `remote`, replacing it.
 pub async fn upload(
     local: &Path,
@@ -618,19 +636,9 @@ pub async fn upload(
 /// F4, Open With): downloaded to `~/.cache/2fip/remote/<server>/<path>`.
 /// Local paths come back unchanged. Edits to the copy stay local.
 pub async fn local_copy(path: &Path) -> Result<PathBuf, String> {
-    let Some(location) = RemoteLocation::parse(path) else {
+    let Some(local) = local_copy_path(path) else {
         return Ok(path.to_path_buf());
     };
-    let server = format!(
-        "{}-{}-{}",
-        location.protocol.scheme(),
-        location.host,
-        location.port
-    );
-    let local = crate::sandbox::cache_home()
-        .join("2fip/remote")
-        .join(server)
-        .join(location.path.trim_start_matches('/'));
     if let Some(folder) = local.parent() {
         tokio::fs::create_dir_all(folder)
             .await

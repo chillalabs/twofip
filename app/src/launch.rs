@@ -82,6 +82,19 @@ pub fn has_default_app(_path: &Path) -> bool {
     true
 }
 
+/// The installed apps that edit plain text, by name: (desktop id, name).
+/// Blocking: reads `.desktop` files.
+pub fn text_editors() -> Vec<(String, String)> {
+    let mut editors: Vec<(String, String)> = load_apps(Some("text/plain"))
+        .into_iter()
+        .filter(|app| app.recommended)
+        .map(|app| (app.id, app.name))
+        .collect();
+    editors.sort_by_key(|(_, name)| name.to_lowercase());
+    editors.dedup_by(|a, b| a.0 == b.0);
+    editors
+}
+
 /// Makes `app_id` (a desktop entry id) the default app for files of type
 /// `mime`, for this and every other app (`xdg-mime default`). Blocking.
 #[cfg(unix)]
@@ -370,20 +383,12 @@ fn terminal_from_system_actions(contents: &str) -> Option<String> {
     })
 }
 
-/// How F3 / F4 open files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpenMode {
-    /// F3: the file's default app (images: the image viewer).
-    View,
-    /// F4: the text editor, whatever the file type (images: the image viewer,
-    /// since a text editor can't show them).
-    Edit,
-}
-
-/// Opens each file (folders are skipped) for viewing or editing.
-pub async fn view_or_edit(paths: Vec<PathBuf>, mode: OpenMode) {
+/// F4: opens each file (folders are skipped) in the text editor, whatever
+/// its type (images: the image viewer, since a text editor can't show them).
+/// `editor`: the app chosen in Settings (a desktop id), else the system's.
+pub async fn edit(paths: Vec<PathBuf>, editor: Option<String>) {
     let paths = local_paths(paths).await;
-    let plan = tokio::task::spawn_blocking(move || plan_view_or_edit(&paths, mode))
+    let plan = tokio::task::spawn_blocking(move || plan_edit(&paths, editor))
         .await
         .unwrap_or_default();
     for (app, files) in plan {
@@ -397,7 +402,7 @@ pub async fn view_or_edit(paths: Vec<PathBuf>, mode: OpenMode) {
 /// Groups `paths` by the app that should open them (`None` = the file's
 /// default app, via `xdg-open`). Blocking: queries MIME types and reads
 /// `.desktop` files.
-fn plan_view_or_edit(paths: &[PathBuf], mode: OpenMode) -> Vec<(Option<AppEntry>, Vec<PathBuf>)> {
+fn plan_edit(paths: &[PathBuf], editor: Option<String>) -> Vec<(Option<AppEntry>, Vec<PathBuf>)> {
     let mut groups: Vec<(Option<String>, Vec<PathBuf>)> = Vec::new();
     for path in paths.iter().filter(|path| !path.is_dir()) {
         let mime = fs_ops::mime::mime_type(path);
@@ -410,12 +415,10 @@ fn plan_view_or_edit(paths: &[PathBuf], mode: OpenMode) -> Vec<(Option<AppEntry>
             mime.as_deref()
                 .and_then(default_app_id)
                 .or_else(|| default_app_id("image/png"))
-        } else if mode == OpenMode::Edit {
+        } else {
             // The text editor: e.g. JSON's default app is often a browser,
             // and source files may have no default at all.
-            default_app_id("text/plain")
-        } else {
-            None
+            editor.clone().or_else(|| default_app_id("text/plain"))
         };
         match groups.iter_mut().find(|(id, _)| *id == app_id) {
             Some((_, files)) => files.push(path.clone()),

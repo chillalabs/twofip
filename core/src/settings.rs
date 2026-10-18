@@ -29,6 +29,9 @@ pub struct Settings {
     pub corners: Corners,
     /// Which panels show the folder tree beside their files.
     pub folder_tree: TreeMode,
+    /// The F4 editor: a desktop app id, or empty for the system's text
+    /// editor.
+    pub editor: String,
 }
 
 /// Which panels show the folder tree ("Show hierarchy"); the toolbar button
@@ -204,6 +207,7 @@ impl Default for Settings {
             color_theme: ColorTheme::default(),
             corners: Corners::default(),
             folder_tree: TreeMode::default(),
+            editor: String::new(),
         }
     }
 }
@@ -324,6 +328,7 @@ mod tests {
             color_theme: ColorTheme::Dracula,
             corners: Corners::Small,
             folder_tree: TreeMode::Both,
+            editor: "org.gnome.TextEditor".to_string(),
         };
 
         save_to(&path, &settings).unwrap();

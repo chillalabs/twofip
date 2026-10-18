@@ -29,7 +29,7 @@ pub use compress::compress_zip;
 pub use conflict::{ConflictHandle, ConflictResolution};
 pub use copy::copy;
 pub use delete::{delete_permanently, delete_to_trash};
-pub use mkdir::create_dir;
+pub use mkdir::{create_dir, create_file};
 pub use mv::move_paths;
 pub use rename::rename;
 

@@ -12,15 +12,17 @@ panel unless a dialog or a side panel is open.
 |---|---|
 | <kbd>F1</kbd> | This help |
 | <kbd>F2</kbd> or <kbd>Shift</kbd>+<kbd>F6</kbd> | Rename |
-| <kbd>F3</kbd> | View (open with the default app) |
+| <kbd>F3</kbd> | View in 2fip's [viewer](viewer.html) (files with an app of their own open there) |
+| <kbd>Alt</kbd>+<kbd>F3</kbd> | Always the built-in viewer |
 | <kbd>F4</kbd> | Edit (open in the text editor) |
+| <kbd>Shift</kbd>+<kbd>F4</kbd> | New file, opened in the editor |
 | <kbd>F5</kbd> | Copy to the other panel |
 | <kbd>F6</kbd> | Move to the other panel |
 | <kbd>F7</kbd> | New folder |
 | <kbd>F8</kbd>, <kbd>Delete</kbd> | Move to the trash |
 | <kbd>Shift</kbd>+<kbd>F8</kbd>, <kbd>Shift</kbd>+<kbd>Delete</kbd> | Delete permanently |
 | <kbd>F9</kbd> | Open a terminal here |
-| <kbd>Alt</kbd>+<kbd>F4</kbd>, <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
+| <kbd>Alt</kbd>+<kbd>F4</kbd> | Quit |
 
 ## Moving around
 
@@ -65,6 +67,7 @@ panel unless a dialog or a side panel is open.
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous tab |
 | <kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>2</kbd> | List / grid view |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Quick filter |
+| <kbd>Ctrl</kbd>+<kbd>Q</kbd> | [Quick View](viewer.html#quick-view) in the other panel |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find files |
 | <kbd>Ctrl</kbd>+<kbd>D</kbd> | Favorites |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Connect to a server |

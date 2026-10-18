@@ -28,12 +28,16 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 libcosmic = { git = "https://github.com/pop-os/libcosmic", features = ["wgpu", "tokio", "single-instance", "desktop"] }
 # Watching the visible folders for external changes (auto-refresh).
 notify = "8"
+# The F3 viewer: image sizes and formats (already in the build through
+# libcosmic), and fast search in big files.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+memchr = "2"
 
 # On Windows (in progress): only the parts of libcosmic that build there. The
 # default features add Wayland, D-Bus and accessibility, which don't.
 [target.'cfg(windows)'.dependencies]
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false, features = ["wgpu", "tokio", "winit", "multi-window"] }
 # Explorer's right-click menu (COM interfaces).
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 # Opening files with their default app, and drops from Explorer.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

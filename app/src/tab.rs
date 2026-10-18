@@ -200,6 +200,24 @@ impl TabState {
             .any(|item| item.path == path)
     }
 
+    /// The keyboard cursor's entry, else the first selected one.
+    pub fn cursor_path(&self) -> Option<PathBuf> {
+        self.cursor
+            .clone()
+            .filter(|cursor| self.selected_contains(cursor))
+            .or_else(|| self.selected_paths().into_iter().next())
+    }
+
+    /// The files (not folders) listed, in the panel's order.
+    pub fn file_paths(&self) -> Vec<PathBuf> {
+        self.entries
+            .iter()
+            .filter_map(|entity| self.entries.item(entity))
+            .filter(|item| !item.is_dir())
+            .map(|item| item.path.clone())
+            .collect()
+    }
+
     /// Paths of all selected entries.
     pub fn selected_paths(&self) -> Vec<PathBuf> {
         self.entries

@@ -31,10 +31,14 @@ details.
 - **Programs:** an executable program, such as an **AppImage**, runs.
 - **Archives** (zip, tar, tgz, txz, 7z): double-click or <kbd>Enter</kbd>
   opens them **like a folder** (see [Archives](#archives)).
-- **<kbd>F3</kbd> View** opens the file's default app (images: the image
-  viewer).
+- **<kbd>F3</kbd> View** shows text files and images in 2fip's own
+  [viewer](viewer.html); PDFs, videos and other files with an app of their
+  own open in that app. **<kbd>Ctrl</kbd>+<kbd>Q</kbd> Quick View** shows the
+  file under the cursor in the other panel.
 - **<kbd>F4</kbd> Edit** always opens the text editor (images: the image
-  viewer), even for files whose default app is something else.
+  viewer), even for files whose default app is something else. Choose the
+  editor in [Settings](settings.html#programs). **<kbd>Shift</kbd>+<kbd>F4</kbd>**
+  creates a new file and opens it.
 - **Open with…** (right-click) lists the apps for the file's type first, then
   all the others. Tick **Always use this app** to make the choice the default
   for that file type.

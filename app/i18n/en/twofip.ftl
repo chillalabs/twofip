@@ -49,6 +49,8 @@ op-progress = { $operation } { $percent }%
 op-files-done = { $done } of { $total } files
 op-bytes-done = { $done } of { $total }
 op-preparing = Preparing…
+op-queued = { $count } waiting
+op-queue-remove = Remove
 close = Close
 cancel = Cancel
 
@@ -317,3 +319,36 @@ connect-name = Name (optional)
 connect-password-stored = Stored in the keyring (type to change)
 connect-save = Save in Connections
 connect-remember-password = Remember the password in the system keyring
+
+# F3 viewer and Quick View (Ctrl+Q)
+quick-view = Quick View
+viewer-loading = Loading…
+viewer-unreadable = This file can't be read.
+viewer-folder = This is a folder.
+viewer-previous = Previous file (P)
+viewer-next = Next file (N)
+viewer-text = Text
+viewer-hex = Hex
+viewer-image = Image
+viewer-zoom-out = Zoom out (−)
+viewer-zoom-fit = Fit to window (0)
+viewer-zoom-in = Zoom in (+)
+viewer-wrap = Wrap lines
+viewer-find = Find
+viewer-find-previous = Find previous (Shift+F3)
+viewer-find-next = Find next (F3)
+viewer-searching = Searching…
+viewer-not-found = Not found
+viewer-open-externally = Open with default app
+viewer-close = Close (Esc)
+
+# F4: editor choice, Shift+F4, editing files on servers
+new-file = New File
+new-file-default-name = New file.txt
+file-name = File name
+settings-programs = Programs
+settings-editor = Editor (F4)
+settings-editor-description = The app F4 opens files in. Files on a server are uploaded again each time you save.
+editor-system-default = System text editor
+notice-uploaded = Saved { $name } to the server.
+notice-upload-failed = Couldn't save { $name } to the server: { $error }

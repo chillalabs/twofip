@@ -28,6 +28,12 @@ list's choice, and <kbd>Esc</kbd> closes the panel.
 | **File name size** | Medium (14 px), Small (13 px), Smaller (12 px), Very small (11 px) or Tiny (10 px): smaller text and shorter rows show more files. It also applies to the Folder Size panel. |
 | **Lines between rows** | A thin line between files and folders in the list view, like COSMIC Files. |
 
+## Programs
+
+| Setting | What it does |
+|---|---|
+| **Editor (F4)** | The app <kbd>F4</kbd> opens files in: the **system text editor**, or one of the installed apps that edit text (for example VS Code or Kate). |
+
 > The **Windows style** and **macOS style** icons are original drawings made for
 > 2fip in a look similar to those systems. 2fip is not affiliated with or
 > endorsed by Microsoft or Apple. Windows is a trademark of Microsoft
