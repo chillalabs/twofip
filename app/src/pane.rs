@@ -98,6 +98,10 @@ pub enum PaneMessage {
     /// takes it from here. Handled by the app.
     #[cfg(windows)]
     DragOut(Vec<PathBuf>),
+    /// Windows: a tab is being dragged; where the mouse is released decides
+    /// which panel opens it. Handled by the app.
+    #[cfg(windows)]
+    TabDragStarted(TabDrag),
     /// Opens or closes a folder in the folder tree.
     TreeToggle(PathBuf),
     /// A folder's subfolders, read for the folder tree.
@@ -407,7 +411,7 @@ impl PaneState {
             | PaneMessage::MountDrive(_)
             | PaneMessage::EjectDrive(_) => Task::none(),
             #[cfg(windows)]
-            PaneMessage::DragOut(_) => Task::none(),
+            PaneMessage::DragOut(_) | PaneMessage::TabDragStarted(_) => Task::none(),
             PaneMessage::TreeToggle(dir) => {
                 let load = self.tree.as_mut().and_then(|tree| tree.toggle(dir));
                 load.map_or_else(Task::none, |dir| self.load_tree(dir))
@@ -782,11 +786,19 @@ impl PaneState {
                 dir: tab_state.current_dir.clone(),
                 view_mode: tab_state.view_mode,
             };
-            strip = strip.push(
+            #[cfg(not(windows))]
+            let tab_element: Element<'_, PaneMessage> =
                 widget::dnd_source::<PaneMessage, TabDrag>(clickable)
                     .drag_content(move || payload.clone())
-                    .drag_icon(move |_| tab_drag_picture(&label)),
-            );
+                    .drag_icon(move |_| tab_drag_picture(&label))
+                    .into();
+            // Windows: 2fip follows the drag itself and opens the tab in
+            // the panel where the mouse is released.
+            #[cfg(windows)]
+            let tab_element: Element<'_, PaneMessage> =
+                crate::drag_start::drag_start(clickable, PaneMessage::TabDragStarted(payload))
+                    .into();
+            strip = strip.push(tab_element);
         }
         // A double click on the empty space beside the tabs opens a new tab
         // on the current folder, like Total Commander. (A tab takes its own
@@ -2003,23 +2015,29 @@ fn draggable_entry<'a>(
     };
     // Shown under the pointer while dragging: the thumbnail (or type icon)
     // of the grabbed entry, with a count when several files go along.
-    let picture = pane.item_icon(item);
-    let name = item.name().to_string();
-    let count = dragged.len();
-    // libcosmic has no drag and drop on Windows yet: Windows runs the drag.
+    #[cfg(not(windows))]
+    let source: Element<'a, PaneMessage> = {
+        let picture = pane.item_icon(item);
+        let name = item.name().to_string();
+        let count = dragged.len();
+        widget::dnd_source::<PaneMessage, FileList>(entry)
+            .drag_content(move || FileList(dragged.clone()))
+            .drag_icon(move |grab_offset| {
+                drag_picture(look, picture.clone(), &name, count, grab_offset)
+            })
+            .into()
+    };
+    // libcosmic has no drag and drop on Windows yet: Windows runs the drag
+    // (with its own picture under the pointer).
     #[cfg(windows)]
-    let drag_out = PaneMessage::DragOut(dragged.clone());
-    let source = widget::dnd_source::<PaneMessage, FileList>(entry)
-        .drag_content(move || FileList(dragged.clone()))
-        .drag_icon(move |grab_offset| {
-            drag_picture(look, picture.clone(), &name, count, grab_offset)
-        });
-    #[cfg(windows)]
-    let source = source.on_start(Some(drag_out));
+    let source: Element<'a, PaneMessage> = {
+        let _ = (pane, look);
+        crate::drag_start::drag_start(entry, PaneMessage::DragOut(dragged)).into()
+    };
     if item.is_dir() && !tab_read_only(tab_state) {
         drop_target(source, item.path.clone(), true)
     } else {
-        source.into()
+        source
     }
 }
 

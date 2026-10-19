@@ -8,6 +8,7 @@ mod connect;
 mod connections_panel;
 mod context_menu;
 mod dnd;
+mod drag_start;
 mod file_item;
 mod find;
 mod folder_size;

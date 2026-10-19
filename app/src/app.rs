@@ -154,6 +154,9 @@ pub enum Message {
     /// on Windows; on Linux, libcosmic's drag and drop handles drops).
     #[cfg(windows)]
     ExternalDrop(Vec<PathBuf>),
+    /// Windows: the mouse button was released while dragging a tab.
+    #[cfg(windows)]
+    TabDragReleased,
     DetailsLoaded(Vec<PathBuf>, Result<Details, String>),
     CloseDetails,
     /// A scan finished (panel, scan generation, result).
@@ -580,6 +583,9 @@ pub struct App {
     viewer: Option<Viewer>,
     /// Quick View (Ctrl+Q): this panel shows the other one's file.
     quick_view: Option<(PaneId, Viewer)>,
+    /// Windows: the tab being dragged, until the mouse is released.
+    #[cfg(windows)]
+    tab_drag: Option<crate::dnd::TabDrag>,
     /// The drive menus' entries (refreshed every few seconds).
     drives: Vec<fs_ops::drives::Drive>,
     settings: Settings,
@@ -669,6 +675,29 @@ impl App {
             Message::Pane(id, PaneMessage::ShowShellMenu) => {
                 self.set_active_pane(id);
                 self.show_shell_menu(id)
+            }
+            #[cfg(windows)]
+            Message::Pane(_, PaneMessage::TabDragStarted(tab)) => {
+                self.tab_drag = Some(tab);
+                Task::none()
+            }
+            #[cfg(windows)]
+            Message::TabDragReleased => {
+                let Some(tab) = self.tab_drag.take() else {
+                    return Task::none();
+                };
+                let target = match crate::windows::cursor_over_right_half() {
+                    Some(true) => PaneId::Right,
+                    Some(false) => PaneId::Left,
+                    None => return Task::none(),
+                };
+                // Released on its own panel: nothing to do (a plain click).
+                if target == tab.source {
+                    return Task::none();
+                }
+                self.set_active_pane(target);
+                self.pane_mut(target)
+                    .update(PaneMessage::TabDropped(Some(tab)))
             }
             #[cfg(windows)]
             Message::Pane(id, PaneMessage::DragOut(paths)) => {
@@ -3696,6 +3725,8 @@ impl Application for App {
             last_notice: 0,
             viewer: None,
             quick_view: None,
+            #[cfg(windows)]
+            tab_drag: None,
             drives: Vec::new(),
             settings,
             user_dirs,
@@ -3885,13 +3916,19 @@ impl Application for App {
         } else {
             key_subscription()
         };
-        Subscription::batch([
+        #[allow(unused_mut)]
+        let mut subscriptions = vec![
             keys,
             watcher::subscription().map(Message::WatcherEvent),
             focus_subscription(),
             // A USB stick plugged in shows up in the drive menus.
             cosmic::iced::time::every(Duration::from_secs(3)).map(|_| Message::RefreshDrives),
-        ])
+        ];
+        #[cfg(windows)]
+        if self.tab_drag.is_some() {
+            subscriptions.push(tab_drag_subscription());
+        }
+        Subscription::batch(subscriptions)
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
@@ -4366,6 +4403,18 @@ fn key_subscription() -> Subscription<Message> {
         Event::Window(cosmic::iced::window::Event::FileDropped(paths)) => {
             Some(Message::ExternalDrop(paths))
         }
+        _ => None,
+    })
+}
+
+/// Windows, while a tab is dragged: the release of the left button, wherever
+/// the mouse is (the panel under it opens the tab).
+#[cfg(windows)]
+fn tab_drag_subscription() -> Subscription<Message> {
+    listen_raw(|event, _status, _window| match event {
+        Event::Mouse(cosmic::iced::mouse::Event::ButtonReleased(
+            cosmic::iced::mouse::Button::Left,
+        )) => Some(Message::TabDragReleased),
         _ => None,
     })
 }
