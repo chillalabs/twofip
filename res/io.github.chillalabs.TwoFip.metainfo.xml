@@ -65,6 +65,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.14" date="2026-10-19">
+      <description>
+        <p>The first Windows downloads:</p>
+        <ul>
+          <li>A Windows installer that works without admin rights, and a portable zip that keeps its settings next to the program</li>
+          <li>No changes to the Linux version</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.13" date="2026-10-18">
       <description>
         <p>Small fixes:</p>

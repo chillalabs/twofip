@@ -2211,7 +2211,7 @@ dependencies = [
 
 [[package]]
 name = "fs-ops"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "flate2",
  "libc",
@@ -6770,7 +6770,7 @@ dependencies = [
 
 [[package]]
 name = "twofip"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "chrono",
  "fs-ops",
