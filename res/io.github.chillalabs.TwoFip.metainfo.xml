@@ -65,6 +65,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.13" date="2026-10-18">
+      <description>
+        <p>Small fixes:</p>
+        <ul>
+          <li>Folder Size: the hand pointer only shows over what can be clicked (rings and folder rows), not over the whole window</li>
+          <li>Favorites: double-click a favorite to open it in the active panel</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.12" date="2026-10-18">
       <description>
         <p>A built-in viewer, Quick View and better editing:</p>
