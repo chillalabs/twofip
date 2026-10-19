@@ -621,8 +621,11 @@ fn entry_row(
     };
 
     let area = widget::mouse_area(row);
+    // A folder row selects its folder (like a ring segment): the hand says
+    // so. Files only have the right-click menu.
     let area = if entry.is_dir {
         area.on_press(Message::FolderSizeSelect(target, entry.path.clone()))
+            .interaction(cosmic::iced::mouse::Interaction::Pointer)
     } else {
         area
     };
@@ -872,13 +875,24 @@ impl Program<Message, cosmic::Theme> for RingChart {
         })]
     }
 
+    /// The hand only over what a click acts on (a ring segment, or the
+    /// center): iced takes the strongest cursor any widget asks for, so a
+    /// hand asked for everywhere showed over the whole window.
     fn mouse_interaction(
         &self,
         _state: &Self::State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        mouse::Interaction::Pointer
+        let clickable = cursor.position_in(bounds).is_some_and(|position| {
+            self.parent_at(position, bounds).is_some()
+                || self.segment_at(position, bounds).is_some()
+        });
+        if clickable {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
     }
 }
 

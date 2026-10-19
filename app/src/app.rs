@@ -3097,13 +3097,15 @@ impl App {
                 .push(buttons);
             let highlighted = self.favorite_cursor == Some(index);
             saved = saved.push(
-                // A click on the row (not its buttons) highlights it.
+                // A click on the row (not its buttons) highlights it; a
+                // double-click opens it in the active panel, like Open.
                 widget::mouse_area(widget::container(row).padding([4, 8]).class(
                     cosmic::theme::Container::custom(move |theme| {
                         highlight_style(theme, highlighted)
                     }),
                 ))
-                .on_press(Message::FocusFavorite(index)),
+                .on_press(Message::FocusFavorite(index))
+                .on_double_click(Message::GoToFavorite(index)),
             );
         }
 

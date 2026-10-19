@@ -18,7 +18,7 @@ press **Add** or <kbd>Enter</kbd>.
 
 | To | Do |
 |---|---|
-| Open one in the active panel | **Open**, or <kbd>Enter</kbd> |
+| Open one in the active panel | **Open**, double-click its row, or <kbd>Enter</kbd> |
 | Move between favorites | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Tab</kbd>, <kbd>Home</kbd> / <kbd>End</kbd> |
 | Reorder | the arrow buttons, or <kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
 | Remove one | the trash button, or <kbd>Delete</kbd> |
