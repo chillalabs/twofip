@@ -88,6 +88,14 @@ Updates come with `flatpak update`. More at <https://chillalabs.github.io/flatpa
 The Flatpak runs the terminal, other apps and thumbnailers on the host system
 (with `flatpak-spawn --host`), so it works like a regular install.
 
+## Windows
+
+Download the installer (`2fip-<version>-windows-x64-setup.exe`, no admin
+rights needed) or the portable zip (`2fip-<version>-windows-x64-portable.zip`,
+unzip and run) from the
+[latest release](https://github.com/chillalabs/twofip/releases/latest). See
+the [installation guide](https://chillalabs.github.io/twofip/install.html#windows).
+
 ## AppImage
 
 Download `2fip-<version>-x86_64.AppImage` from the

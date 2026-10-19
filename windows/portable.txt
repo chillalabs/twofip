@@ -1,0 +1,12 @@
+2fip portable
+
+This file makes 2fip portable: while it sits next to 2fip.exe, 2fip keeps
+its settings, favorites, saved connections and caches in the "data" folder
+beside it, instead of your user profile. Move or copy the whole folder (for
+example to a USB stick) and your setup goes with it.
+
+Saved server passwords stay in Windows Credential Manager, on each computer.
+
+Delete this file to make 2fip use your user profile instead.
+
+Help: https://chillalabs.github.io/twofip/

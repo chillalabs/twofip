@@ -35,6 +35,10 @@ notify = "8"
 
 # On Windows (in progress): only the parts of libcosmic that build there. The
 # default features add Wayland, D-Bus and accessibility, which don't.
+# The icon and version details inside 2fip.exe (see build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [target.'cfg(windows)'.dependencies]
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false, features = ["wgpu", "tokio", "winit", "multi-window"] }
 # Explorer's right-click menu (COM interfaces).

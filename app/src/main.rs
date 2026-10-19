@@ -1,3 +1,7 @@
+// Windows release builds have no console window (debug builds keep it for
+// the log messages).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod about;
 mod app;
 mod connect;

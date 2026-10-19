@@ -3,8 +3,9 @@ layout: default
 title: Installation
 ---
 
-2fip runs on Linux. It is made for the COSMIC desktop (Pop!_OS 24.04 and
-later, Fedora COSMIC, and others) but works on other Wayland desktops too.
+2fip runs on Linux and Windows. On Linux it is made for the COSMIC desktop
+(Pop!_OS 24.04 and later, Fedora COSMIC, and others) but works on other
+Wayland desktops too. For Windows, see [Windows](#windows) below.
 
 ## Flatpak (recommended)
 
@@ -51,6 +52,30 @@ cd 2fip-*-x86_64
 
 Remove it with `./install.sh --uninstall`. Your settings are kept.
 
+## Windows
+
+Windows 10 and 11 (64-bit). Download from the
+[latest release](https://github.com/chillalabs/twofip/releases/latest):
+
+- **Installer:** `2fip-<version>-windows-x64-setup.exe`. It installs for your
+  user without admin rights (or for all users, if you choose so), adds 2fip
+  to the Start menu and an uninstaller to *Settings → Apps*. Installing a
+  newer version updates the old one.
+- **Portable:** `2fip-<version>-windows-x64-portable.zip`. Unzip it anywhere
+  (Documents, a USB stick…) and run `2fip.exe`: no installation, no admin
+  rights. The `portable.txt` file next to it keeps settings, favorites and
+  saved connections in a `data` folder beside the program, so the folder can
+  be moved. Delete `portable.txt` to use your user profile instead.
+
+2fip isn't signed yet, so Windows may say **"Windows protected your PC"** the
+first time: click **More info → Run anyway**. In companies, rules such as
+AppLocker may only allow programs installed in `C:\Program Files`: use the
+installer and choose **Install for all users** (that needs admin rights).
+
+On Windows, 2fip uses drive letters (`C:`, `D:`, USB sticks…), Explorer's
+right-click menu and icons, and Windows Credential Manager for saved
+passwords.
+
 ## Build from source
 
 You need Rust (stable), [just](https://github.com/casey/just) and the usual
@@ -71,3 +96,7 @@ just install    # install into ~/.local
 | Passwords you chose to remember | the system keyring (GNOME Keyring, KWallet) |
 | Thumbnails (shared with other file managers) | `~/.cache/thumbnails/` |
 | Local copies of files opened from servers | `~/.cache/2fip/remote/` |
+
+On Windows: settings in `%APPDATA%\2fip\`, caches in `%LOCALAPPDATA%\2fip\`,
+passwords in Credential Manager; the portable version keeps settings and
+caches in its `data` folder.

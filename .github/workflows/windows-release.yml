@@ -1,0 +1,84 @@
+# Builds the Windows downloads: an installer (Inno Setup) and a portable
+# zip. On a release tag (vX.Y.Z) they are attached to that GitHub release,
+# next to the Linux files; run by hand without a tag, they are kept as the
+# run's artifacts for testing.
+name: Windows release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the files to (empty: test build, artifacts only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build 2fip.exe
+        run: cargo build --release -p twofip
+
+      - name: Version
+        id: version
+        shell: bash
+        run: echo "version=$(cargo pkgid -p twofip | sed 's/.*[@#]//')" >> "$GITHUB_OUTPUT"
+
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" windows\2fip.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $name = "2fip-${{ steps.version.outputs.version }}-windows-x64-portable"
+          $folder = "dist\$name"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          Copy-Item target\release\2fip.exe $folder
+          Copy-Item windows\portable.txt $folder
+          Copy-Item LICENSE "$folder\LICENSE.txt"
+          Compress-Archive -Path $folder -DestinationPath "dist\$name.zip" -Force
+
+      - name: Keep the files (test builds)
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2fip-windows-${{ steps.version.outputs.version }}
+          path: |
+            dist/*-setup.exe
+            dist/*-portable.zip
+          retention-days: 14
+
+      - name: Attach to the GitHub release
+        if: env.TAG != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The release is created right after the tag is pushed: wait for it.
+          for attempt in $(seq 1 45); do
+            gh release view "$TAG" > /dev/null 2>&1 && break
+            sleep 20
+          done
+          gh release upload "$TAG" dist/*-setup.exe dist/*-portable.zip --clobber

@@ -56,12 +56,37 @@ fn xdg_home(variable: &str, default: &str) -> PathBuf {
 
 #[cfg(windows)]
 pub fn config_home() -> PathBuf {
+    if let Some(data) = portable_data() {
+        return data.join("config");
+    }
     non_empty_var("APPDATA").unwrap_or_else(|| home_dir().join("AppData\\Roaming"))
 }
 
 #[cfg(windows)]
 pub fn cache_home() -> PathBuf {
+    if let Some(data) = portable_data() {
+        return data.join("cache");
+    }
     non_empty_var("LOCALAPPDATA").unwrap_or_else(|| home_dir().join("AppData\\Local"))
+}
+
+/// Windows portable mode: with a `portable.txt` file next to `2fip.exe`,
+/// settings, favorites, connections and caches live in the `data` folder
+/// beside it instead of the user profile, so the folder can be moved or
+/// carried on a USB stick. (Saved passwords stay in Credential Manager.)
+#[cfg(windows)]
+pub fn portable_data() -> Option<&'static Path> {
+    static PORTABLE: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PORTABLE
+        .get_or_init(|| {
+            let exe = std::env::current_exe().ok()?;
+            let folder = exe.parent()?;
+            folder
+                .join("portable.txt")
+                .is_file()
+                .then(|| folder.join("data"))
+        })
+        .as_deref()
 }
 
 /// A command that runs `program` on the host system: through
