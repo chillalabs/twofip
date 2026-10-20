@@ -106,6 +106,7 @@ pub fn menu_bar<'a>(
         ),
         MenuItem::Divider,
         button(fl!("rename-ellipsis"), "edit-symbolic", Action::Rename),
+        crate::context_menu::folder_color_item(TopMenuAction),
         button(fl!("delete"), "user-trash-symbolic", Action::Delete),
         button(
             fl!("delete-permanently"),

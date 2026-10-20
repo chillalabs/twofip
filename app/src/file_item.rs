@@ -19,6 +19,8 @@ pub struct ListingOptions {
     pub icon_style: IconStyle,
     /// Well-known folders (Documents, Downloads, ...) that get their own icon.
     pub user_dirs: Arc<HashMap<PathBuf, UserDir>>,
+    /// Colors the user picked for folders (right-click → Folder color).
+    pub folder_colors: Arc<fs_ops::folder_colors::FolderColors>,
     /// Show content previews (images, PDFs, videos, ...) instead of icons.
     pub show_thumbnails: bool,
     /// List view: a thin line between rows.
@@ -160,9 +162,25 @@ fn icon_handle(
         IconStyle::Soft => Some(crate::icon_sets::IconSet::Soft),
         IconStyle::Colorful | IconStyle::Monochrome => None,
     };
+    // With the icon theme's folders, a folder with a color the user picked
+    // is drawn by 2fip in that color (the theme's folders have none).
+    let colored = (kind == EntryKind::Dir && options.icon_style == IconStyle::Colorful)
+        .then(|| options.folder_colors.get(path))
+        .flatten();
+    if let Some(color) = colored {
+        return crate::icon_sets::folder(
+            crate::icon_sets::IconSet::Vivid,
+            options.user_dirs.get(path).copied(),
+            Some(*color),
+        );
+    }
     if let Some(set) = own_set.filter(|_| kind != EntryKind::Symlink) {
         return match kind {
-            EntryKind::Dir => crate::icon_sets::folder(set, options.user_dirs.get(path).copied()),
+            EntryKind::Dir => crate::icon_sets::folder(
+                set,
+                options.user_dirs.get(path).copied(),
+                options.folder_colors.get(path).copied(),
+            ),
             _ => crate::icon_sets::file(
                 set,
                 mime,

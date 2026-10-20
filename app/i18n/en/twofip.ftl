@@ -352,3 +352,30 @@ settings-editor-description = The app F4 opens files in. Files on a server are u
 editor-system-default = System text editor
 notice-uploaded = Saved { $name } to the server.
 notice-upload-failed = Couldn't save { $name } to the server: { $error }
+
+# Favorites menu (Ctrl+D) and Configure dialog
+favorites-remove-current = Remove current folder
+favorites-configure = Configure…
+favorites-configure-title = Configure favorites
+favorites-add-item = Add current folder
+favorites-delete-item = Delete
+favorites-up = Move up
+favorites-down = Move down
+favorites-title = Title
+favorites-folder = Folder
+favorites-use-current = Use the active panel's folder
+ok = OK
+
+# Folder colors (right-click → Folder color)
+folder-color-ellipsis = Folder color…
+folder-color-one = Color for “{ $name }”
+folder-color-many = Color for { $count } folders
+folder-color-default = Default
+color-red = Red
+color-orange = Orange
+color-yellow = Yellow
+color-green = Green
+color-blue = Blue
+color-purple = Purple
+color-pink = Pink
+color-grey = Grey

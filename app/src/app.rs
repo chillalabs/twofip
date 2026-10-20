@@ -16,7 +16,8 @@ use cosmic::{Application, Element};
 use tokio_stream::{Stream, StreamExt};
 
 use fs_ops::details::Details;
-use fs_ops::favorites::{DuplicateReason, Favorite};
+use fs_ops::favorites::Favorite;
+use fs_ops::folder_colors::FolderColor;
 use fs_ops::ops::{CancelHandle, ConflictHandle, ConflictResolution, OpEvent};
 use fs_ops::search::SearchEvent;
 use fs_ops::session::Session;
@@ -25,6 +26,7 @@ use fs_ops::user_dirs::UserDir;
 use fs_ops::EntryKind;
 
 use crate::connect::{ConnectState, ConnectStatus};
+use crate::favorites_menu::{Config as FavoritesConfig, FavoritesMessage};
 use crate::file_item::{format_modified, format_size, ListingOptions};
 use crate::find::{FindState, FindStatus};
 use crate::fl;
@@ -81,7 +83,11 @@ pub enum Message {
     RenameInputChanged(String),
     ConfirmRename,
     CancelRename,
-    RenameFinished(Result<PathBuf, String>),
+    /// The Folder color picker: a color (or `None`, Default) was chosen.
+    PickFolderColor(Option<FolderColor>),
+    CancelFolderColor,
+    /// A rename finished (the old path, and the new one or the error).
+    RenameFinished(PathBuf, Result<PathBuf, String>),
     ConflictRenameInputChanged(String),
     BeginConflictRename,
     ConfirmConflictRename,
@@ -102,14 +108,8 @@ pub enum Message {
     RemoteEditEnded(PathBuf),
     HideNotice(u64),
     ResolveConflict(ConflictResolution),
-    FavoriteNameChanged(String),
-    AddFavorite,
-    /// Dismisses the "favorite already saved" alert.
-    CloseFavoriteAlert,
-    RemoveFavorite(usize),
-    /// Moves a favorite one place up (`true`) or down in the list.
-    MoveFavorite(usize, bool),
-    GoToFavorite(usize),
+    /// The Ctrl+D favorites menu and its Configure dialog.
+    Favorites(FavoritesMessage),
     /// Pack dialog: the archive's path, format, password and
     /// "Move to archive".
     PackPathChanged(String),
@@ -186,8 +186,6 @@ pub enum Message {
     CornersSelected(usize),
     /// A click on a Settings row: give it the keyboard focus.
     FocusSettingsRow(SettingsRow),
-    /// A click on a favorite: highlight it for the keyboard.
-    FocusFavorite(usize),
     CloseDrawer,
     ConnectProtocol(usize),
     ConnectHost(String),
@@ -287,24 +285,8 @@ const FONT_SIZES: [FontSize; 5] = [
     FontSize::ExtraSmall,
 ];
 
-/// Where the Favorites dialog's keyboard focus is: on the list (see
-/// `favorite_cursor`), the new favorite's name field, or a button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FavoriteFocus {
-    List,
-    NameField,
-    AddButton,
-    CloseButton,
-}
-
 /// The user's guide (`docs/` in the repository, on GitHub Pages).
 const HELP_URL: &str = "https://chillalabs.github.io/twofip/";
-
-/// Text sizes in the Favorites dialog: a step below libcosmic's body (14)
-/// and caption (12).
-const FAVORITES_NAME_SIZE: f32 = 13.0;
-const FAVORITES_PATH_SIZE: f32 = 11.0;
-const FAVORITES_LIST_MAX_HEIGHT: f32 = 360.0;
 
 /// The Settings panel's rows, top to bottom, for keyboard navigation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,7 +399,6 @@ fn icon_style_name(style: IconStyle) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DrawerPage {
     Settings,
-    Favorites,
     About,
     Connections,
 }
@@ -525,8 +506,10 @@ pub struct App {
     pending_conflict: Option<(PathBuf, PathBuf)>,
     conflict_rename: Option<ConflictRenameState>,
     favorites: Vec<Favorite>,
-    /// The Favorites panel's name field; empty means "use the folder's name".
-    favorite_name: String,
+    /// The Ctrl+D menu, while open: the entry the keyboard is on.
+    favorites_menu: Option<usize>,
+    /// The favorites' Configure dialog, while open.
+    favorites_config: Option<FavoritesConfig>,
     /// The Delete dialog's buttons, so the keyboard can move focus between them.
     confirm_delete_button: widget::Id,
     cancel_delete_button: widget::Id,
@@ -543,14 +526,6 @@ pub struct App {
     conflict_focus: usize,
     /// Which Delete dialog button has keyboard focus (true = Delete).
     delete_focus_on_confirm: bool,
-    /// The favorite highlighted for keyboard use (↑/↓ to move, Enter to open)
-    /// while the Favorites panel is open.
-    favorite_cursor: Option<usize>,
-    /// Where the Favorites dialog's keyboard focus is.
-    favorite_focus: FavoriteFocus,
-    /// Set when Add was refused because the favorite is already saved: the
-    /// existing entry (so the list can highlight it) and why it clashes.
-    favorite_alert: Option<(usize, DuplicateReason)>,
     /// The Find Files dialog, while open.
     find: Option<FindState>,
     /// The "Connect to server" dialog, while open.
@@ -561,9 +536,6 @@ pub struct App {
     saved_connections: Vec<fs_ops::connections::SavedConnection>,
     /// Their last known state, by connection root.
     connection_checks: HashMap<PathBuf, crate::connections_panel::Check>,
-    favorite_add_button: widget::Id,
-    favorite_close_button: widget::Id,
-    favorite_name_input: widget::Id,
     /// The Settings row with keyboard focus (index into [`SETTINGS_ROWS`]).
     settings_cursor: usize,
     clipboard: Option<Clipboard>,
@@ -590,6 +562,13 @@ pub struct App {
     drives: Vec<fs_ops::drives::Drive>,
     settings: Settings,
     user_dirs: Arc<HashMap<PathBuf, UserDir>>,
+    /// Colors the user picked for folders.
+    folder_colors: Arc<fs_ops::folder_colors::FolderColors>,
+    /// The Folder color picker, while open: the folders it colors.
+    folder_color_picker: Option<Vec<PathBuf>>,
+    /// Folders being moved (from, to) whose colors follow them once the
+    /// move is done.
+    color_moves: Vec<(PathBuf, PathBuf)>,
     drawer: Option<DrawerPage>,
     /// The session as last written to disk, to skip saving when unchanged.
     saved_session: Session,
@@ -933,8 +912,8 @@ impl App {
                     }
                     return self.find_key(modifiers, &key);
                 }
-                if let Some(task) = self.favorites_key(modifiers, &key) {
-                    return task;
+                if self.favorites_menu.is_some() {
+                    return self.favorites_menu_key(modifiers, &key);
                 }
                 if let Some(task) = self.settings_key(modifiers, &key) {
                     return task;
@@ -987,6 +966,7 @@ impl App {
                 OpEvent::Done | OpEvent::Cancelled => {
                     self.operation = None;
                     self.last_op_done = Some(Instant::now());
+                    self.apply_color_moves();
                     let reload = self.reload_both_panes();
                     let folder_size = self.refresh_folder_size();
                     let next = self.start_next_operation();
@@ -1061,17 +1041,27 @@ impl App {
                     return Task::none();
                 };
                 cosmic::task::future(async move {
+                    let old = rename.path.clone();
                     let result = fs_ops::ops::rename(rename.path, rename.name).await;
-                    Message::RenameFinished(result)
+                    Message::RenameFinished(old, result)
                 })
             }
             Message::CancelRename => {
                 self.rename = None;
                 Task::none()
             }
-            Message::RenameFinished(result) => {
-                if let Err(err) = result {
-                    eprintln!("rename failed: {err}");
+            Message::PickFolderColor(color) => self.set_folder_color(color),
+            Message::CancelFolderColor => {
+                self.folder_color_picker = None;
+                Task::none()
+            }
+            Message::RenameFinished(old, result) => {
+                match result {
+                    Ok(new) => {
+                        self.color_moves.push((old, new));
+                        self.apply_color_moves();
+                    }
+                    Err(err) => eprintln!("rename failed: {err}"),
                 }
                 self.reload_both_panes()
             }
@@ -1185,72 +1175,7 @@ impl App {
                 }
                 Task::none()
             }
-            Message::FavoriteNameChanged(value) => {
-                self.favorite_name = value;
-                Task::none()
-            }
-            Message::AddFavorite => {
-                let path = self.pane(self.active_pane).current_dir();
-                let name = match self.favorite_name.trim() {
-                    "" => tab_label(&path),
-                    name => name.to_string(),
-                };
-                if let Some((index, reason)) =
-                    fs_ops::favorites::find_duplicate(&self.favorites, &name, &path)
-                {
-                    // Don't save the same thing twice: highlight the entry that's
-                    // already there and say why it clashes. The name box keeps its
-                    // text, so a name clash can be edited and retried.
-                    self.favorite_cursor = Some(index);
-                    self.favorite_focus = FavoriteFocus::List;
-                    self.favorite_alert = Some((index, reason));
-                    return widget::button::focus(self.dialog_confirm.clone());
-                }
-                self.favorites.push(Favorite { name, path });
-                self.persist_favorites();
-                self.favorite_name.clear();
-                self.favorite_cursor = Some(self.favorites.len() - 1);
-                Task::none()
-            }
-            Message::CloseFavoriteAlert => {
-                self.favorite_alert = None;
-                self.focus_favorite_name()
-            }
-            Message::RemoveFavorite(index) => {
-                if index < self.favorites.len() {
-                    self.favorites.remove(index);
-                    self.persist_favorites();
-                    // Keep the highlight on a row that still exists.
-                    let last = self.favorites.len().checked_sub(1);
-                    self.favorite_cursor = self.favorite_cursor.zip(last).map(|(c, l)| c.min(l));
-                }
-                Task::none()
-            }
-            Message::MoveFavorite(index, up) => {
-                let target = if up {
-                    index.checked_sub(1)
-                } else {
-                    Some(index + 1)
-                };
-                if let Some(target) = target.filter(|t| *t < self.favorites.len()) {
-                    self.favorites.swap(index, target);
-                    self.persist_favorites();
-                    // The highlight follows the moved favorite.
-                    if self.favorite_cursor == Some(index) {
-                        self.favorite_cursor = Some(target);
-                    }
-                }
-                Task::none()
-            }
-            Message::GoToFavorite(index) => {
-                let Some(favorite) = self.favorites.get(index) else {
-                    return Task::none();
-                };
-                let path = favorite.path.clone();
-                self.close_drawer();
-                self.pane_mut(self.active_pane)
-                    .update(PaneMessage::Navigate(path))
-            }
+            Message::Favorites(message) => self.favorites_message(message),
             Message::PackPathChanged(value) => {
                 if let Some(pack) = &mut self.compress {
                     pack.path = value;
@@ -1528,11 +1453,6 @@ impl App {
                     self.persist_settings();
                 }
                 Task::none()
-            }
-            Message::FocusFavorite(index) => {
-                self.favorite_cursor = Some(index);
-                self.favorite_focus = FavoriteFocus::List;
-                unfocus_text_fields()
             }
             Message::FocusSettingsRow(row) => {
                 self.focus_settings_row(row);
@@ -2166,7 +2086,16 @@ impl App {
                 .pane_mut(self.active_pane)
                 .update(PaneMessage::EnterSelectedFolder),
             Action::Favorites => {
-                self.toggle_drawer(DrawerPage::Favorites);
+                if self.favorites_menu.take().is_none() {
+                    self.close_drawer();
+                    // Start on the current folder's favorite, if it has one.
+                    let current = self.pane(self.active_pane).current_dir();
+                    let at = self
+                        .favorites
+                        .iter()
+                        .position(|favorite| favorite.path == current);
+                    self.favorites_menu = Some(at.unwrap_or(0));
+                }
                 Task::none()
             }
             Action::Open => {
@@ -2277,6 +2206,18 @@ impl App {
                 });
                 Task::none()
             }
+            Action::FolderColor => {
+                let pane = self.pane(self.active_pane);
+                let folders: Vec<PathBuf> = pane
+                    .selected_paths()
+                    .into_iter()
+                    .filter(|path| pane.is_listed_folder(path))
+                    .collect();
+                if !folders.is_empty() {
+                    self.folder_color_picker = Some(folders);
+                }
+                Task::none()
+            }
             Action::ShowDetails => {
                 let paths = self.pane(self.active_pane).selected_paths();
                 if paths.is_empty() {
@@ -2343,6 +2284,7 @@ impl App {
             hide_hidden: self.settings.hide_hidden_files,
             icon_style: self.settings.icon_style,
             user_dirs: self.user_dirs.clone(),
+            folder_colors: self.folder_colors.clone(),
             show_thumbnails: self.settings.show_thumbnails,
             row_lines: self.settings.row_lines,
             font_size: self.settings.name_font_size,
@@ -2399,16 +2341,6 @@ impl App {
             self.core.set_show_context(true);
             if page == DrawerPage::Settings {
                 self.settings_cursor = 0;
-            }
-            if page == DrawerPage::Favorites {
-                self.favorite_focus = FavoriteFocus::List;
-                // Start on the current folder's favorite, if it has one.
-                let current = self.pane(self.active_pane).current_dir();
-                self.favorite_cursor = self
-                    .favorites
-                    .iter()
-                    .position(|favorite| favorite.path == current)
-                    .or((!self.favorites.is_empty()).then_some(0));
             }
         }
     }
@@ -2575,109 +2507,250 @@ impl App {
         )
     }
 
-    /// While the Favorites panel is open, ↑/↓ move its highlight and Enter
-    /// opens the highlighted favorite. Returns `None` for any other key, so it
-    /// falls through to the normal shortcuts.
-    fn favorites_key(&mut self, modifiers: Modifiers, key: &Key) -> Option<Task<Message>> {
-        if self.drawer != Some(DrawerPage::Favorites) {
-            return None;
-        }
-        // Ctrl+↑/↓ reorders the highlighted favorite.
-        if modifiers == Modifiers::CTRL {
-            let up = match key {
-                Key::Named(Named::ArrowUp) => true,
-                Key::Named(Named::ArrowDown) => false,
-                _ => return None,
-            };
-            let index = self.favorite_cursor?;
-            return Some(self.update(Message::MoveFavorite(index, up)));
-        }
-        let count = self.favorites.len();
-        let forward = match (key, modifiers) {
-            (Key::Named(Named::ArrowDown), m) if m.is_empty() => Some(true),
-            (Key::Named(Named::Tab), m) if m.is_empty() => Some(true),
-            (Key::Named(Named::ArrowUp), m) if m.is_empty() => Some(false),
-            (Key::Named(Named::Tab), m) if m == Modifiers::SHIFT => Some(false),
-            _ => None,
+    /// The color picker's choice: `color` (or none) for its folders.
+    fn set_folder_color(&mut self, color: Option<FolderColor>) -> Task<Message> {
+        let Some(folders) = self.folder_color_picker.take() else {
+            return Task::none();
         };
-        if let Some(forward) = forward {
-            return Some(self.move_favorite_focus(forward));
-        }
-        if !modifiers.is_empty() {
-            return None;
-        }
-        match self.favorite_focus {
-            FavoriteFocus::List => {}
-            // The name field handles its own typing (and Enter adds).
-            FavoriteFocus::NameField => return None,
-            // A focused button runs on Enter or Space by itself; this is the
-            // fallback if it didn't take the key.
-            FavoriteFocus::AddButton | FavoriteFocus::CloseButton => {
-                let message = match self.favorite_focus {
-                    FavoriteFocus::AddButton => Message::AddFavorite,
-                    _ => Message::CloseDrawer,
-                };
-                return match key {
-                    Key::Named(Named::Enter) => Some(self.update(message)),
-                    Key::Character(c) if c.as_str() == " " => Some(self.update(message)),
-                    _ => None,
-                };
+        let mut colors = (*self.folder_colors).clone();
+        for folder in folders {
+            match color {
+                Some(color) => {
+                    colors.insert(folder, color);
+                }
+                None => {
+                    colors.remove(&folder);
+                }
             }
         }
-        match key {
-            Key::Named(Named::Home) if count > 0 => {
-                self.favorite_cursor = Some(0);
-                Some(Task::none())
+        self.store_folder_colors(colors)
+    }
+
+    /// The Folder color picker: the colors as large samples (one click
+    /// picks), then Default and Cancel.
+    fn folder_color_dialog<'a>(&'a self, folders: &'a [PathBuf]) -> Element<'a, Message> {
+        let title = match folders {
+            [one] => fl!("folder-color-one", name = tab_label(one)),
+            _ => fl!("folder-color-many", count = folders.len()),
+        };
+        // The color they all have now, to mark it.
+        let current = folders
+            .iter()
+            .map(|folder| self.folder_colors.get(folder).copied())
+            .reduce(|a, b| if a == b { a } else { None })
+            .flatten();
+        let any_colored = folders
+            .iter()
+            .any(|folder| self.folder_colors.contains_key(folder));
+        let mut swatches = widget::Row::new().spacing(6).align_y(Alignment::Center);
+        for color in FolderColor::ALL {
+            let sample = widget::icon(crate::icon_sets::color_swatch(color)).size(36);
+            let button = widget::button::custom(sample)
+                .padding(4)
+                .class(if current == Some(color) {
+                    cosmic::theme::Button::Suggested
+                } else {
+                    cosmic::theme::Button::Icon
+                })
+                .on_press(Message::PickFolderColor(Some(color)));
+            swatches = swatches.push(themes::tooltip(
+                button,
+                widget::text(crate::context_menu::color_name(color)),
+                widget::tooltip::Position::Bottom,
+            ));
+        }
+        widget::dialog()
+            .title(title)
+            .control(swatches)
+            .primary_action(
+                widget::button::standard(fl!("cancel")).on_press(Message::CancelFolderColor),
+            )
+            .secondary_action(
+                widget::button::standard(fl!("folder-color-default"))
+                    // Whenever any of them has a color, even different ones.
+                    .on_press_maybe(any_colored.then_some(Message::PickFolderColor(None))),
+            )
+            .into()
+    }
+
+    /// Keeps `colors`, saves them and redraws the listings.
+    fn store_folder_colors(
+        &mut self,
+        colors: fs_ops::folder_colors::FolderColors,
+    ) -> Task<Message> {
+        if let Err(err) = fs_ops::folder_colors::save(&colors) {
+            eprintln!("failed to save folder colors: {err}");
+        }
+        self.folder_colors = Arc::new(colors);
+        self.apply_settings()
+    }
+
+    /// Before moving `sources` into `dest`: remembers the colored folders
+    /// among them (or inside them), so their colors can follow.
+    fn note_color_moves(&mut self, sources: &[PathBuf], dest: &Path) {
+        for source in sources {
+            let colored = self
+                .folder_colors
+                .keys()
+                .any(|path| path.starts_with(source));
+            if let (true, Some(name)) = (colored, source.file_name()) {
+                self.color_moves.push((source.clone(), dest.join(name)));
             }
-            Key::Named(Named::End) if count > 0 => {
-                self.favorite_cursor = Some(count - 1);
-                Some(Task::none())
-            }
-            Key::Named(Named::Enter) => Some(match self.favorite_cursor {
-                Some(index) => self.update(Message::GoToFavorite(index)),
-                None => Task::none(),
-            }),
-            Key::Named(Named::Delete) => Some(match self.favorite_cursor {
-                Some(index) => self.update(Message::RemoveFavorite(index)),
-                None => Task::none(),
-            }),
-            _ => None,
         }
     }
 
-    /// Moves the Favorites keyboard focus one step: through the favorites,
-    /// then the "Add current folder" name field, the Add button and Close,
-    /// wrapping around.
-    fn move_favorite_focus(&mut self, forward: bool) -> Task<Message> {
-        let count = self.favorites.len();
-        // Positions 0..count are favorites, then the name field, Add, Close.
-        let current = match self.favorite_focus {
-            FavoriteFocus::List => self.favorite_cursor.unwrap_or(count),
-            FavoriteFocus::NameField => count,
-            FavoriteFocus::AddButton => count + 1,
-            FavoriteFocus::CloseButton => count + 2,
-        };
-        let target = step_index(current, if forward { 1 } else { -1 }, count + 3);
-        if target < count {
-            self.favorite_focus = FavoriteFocus::List;
-            self.favorite_cursor = Some(target);
-            return unfocus_text_fields();
+    /// After a move or rename: the colors of folders that are now in their
+    /// new place go with them (a move that failed or was skipped leaves the
+    /// old folder there, and its color with it).
+    fn apply_color_moves(&mut self) {
+        if self.color_moves.is_empty() {
+            return;
         }
-        self.favorite_cursor = None;
-        match target - count {
-            0 => {
-                self.favorite_focus = FavoriteFocus::NameField;
-                widget::text_input::focus(self.favorite_name_input.clone())
+        let mut colors = (*self.folder_colors).clone();
+        let mut changed = false;
+        for (from, to) in std::mem::take(&mut self.color_moves) {
+            if !from.exists() && to.exists() {
+                changed |= fs_ops::folder_colors::moved(&mut colors, &from, &to);
             }
-            1 => {
-                self.favorite_focus = FavoriteFocus::AddButton;
-                widget::button::focus(self.favorite_add_button.clone())
+        }
+        if changed {
+            // The panels reload after a move or rename anyway.
+            let _ = self.store_folder_colors(colors);
+        }
+    }
+
+    /// The Ctrl+D menu and the Configure dialog.
+    fn favorites_message(&mut self, message: FavoritesMessage) -> Task<Message> {
+        let current = self.pane(self.active_pane).current_dir();
+        match message {
+            FavoritesMessage::Open(index) => {
+                self.favorites_menu = None;
+                let Some(favorite) = self.favorites.get(index).cloned() else {
+                    return Task::none();
+                };
+                return self
+                    .pane_mut(self.active_pane)
+                    .update(PaneMessage::Navigate(favorite.path));
+            }
+            FavoritesMessage::ToggleCurrent => {
+                self.favorites_menu = None;
+                match self
+                    .favorites
+                    .iter()
+                    .position(|favorite| favorite.path == current)
+                {
+                    Some(index) => {
+                        self.favorites.remove(index);
+                    }
+                    None => self.favorites.push(Favorite {
+                        name: tab_label(&current),
+                        path: current,
+                    }),
+                }
+                self.persist_favorites();
+            }
+            FavoritesMessage::Configure => {
+                self.favorites_menu = None;
+                self.favorites_config = Some(FavoritesConfig::new(&self.favorites, &current));
+            }
+            FavoritesMessage::CloseMenu => self.favorites_menu = None,
+            FavoritesMessage::Ok => {
+                if let Some(config) = self.favorites_config.take() {
+                    self.favorites = config.favorites();
+                    self.persist_favorites();
+                }
+            }
+            FavoritesMessage::Cancel => self.favorites_config = None,
+            message => {
+                let Some(config) = &mut self.favorites_config else {
+                    return Task::none();
+                };
+                match message {
+                    FavoritesMessage::Select(index) => config.selected = Some(index),
+                    FavoritesMessage::Add => config.add(&current),
+                    FavoritesMessage::Delete => config.delete(),
+                    FavoritesMessage::Move(up) => config.move_selected(up),
+                    FavoritesMessage::Title(text) => {
+                        if let Some(draft) = config.selected_mut() {
+                            draft.name = text;
+                        }
+                    }
+                    FavoritesMessage::Path(text) => {
+                        if let Some(draft) = config.selected_mut() {
+                            draft.path = text;
+                        }
+                    }
+                    FavoritesMessage::UseCurrent => {
+                        if let Some(draft) = config.selected_mut() {
+                            draft.path = current.display().to_string();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Task::none()
+    }
+
+    /// The Ctrl+D menu has the keyboard while it's open: ↑/↓ (Home/End)
+    /// move, Enter picks; "-" adds or removes the current folder and "*"
+    /// opens Configure, as in Total Commander; Ctrl+D closes it.
+    fn favorites_menu_key(&mut self, modifiers: Modifiers, key: &Key) -> Task<Message> {
+        let Some(cursor) = self.favorites_menu else {
+            return Task::none();
+        };
+        let len = crate::favorites_menu::menu_len(&self.favorites);
+        let plain = modifiers.is_empty() || modifiers == Modifiers::SHIFT;
+        let next = match key {
+            Key::Named(Named::ArrowDown) => (cursor + 1) % len,
+            Key::Named(Named::ArrowUp) => (cursor + len - 1) % len,
+            Key::Named(Named::Home) => 0,
+            Key::Named(Named::End) => len - 1,
+            Key::Named(Named::Enter) => {
+                let message = crate::favorites_menu::menu_message(&self.favorites, cursor);
+                return self.favorites_message(message);
+            }
+            Key::Character(c) if plain && c.as_str() == "-" => {
+                return self.favorites_message(FavoritesMessage::ToggleCurrent);
+            }
+            Key::Character(c) if plain && c.as_str() == "*" => {
+                return self.favorites_message(FavoritesMessage::Configure);
             }
             _ => {
-                self.favorite_focus = FavoriteFocus::CloseButton;
-                widget::button::focus(self.favorite_close_button.clone())
+                if crate::keybinds::action_for(&self.keybinds, modifiers, key)
+                    == Some(Action::Favorites)
+                {
+                    self.favorites_menu = None;
+                }
+                return Task::none();
             }
-        }
+        };
+        self.favorites_menu = Some(next);
+        Task::none()
+    }
+
+    /// `frame` (a panel) with the Ctrl+D menu over its top left corner,
+    /// when it's the active panel and the menu is open.
+    fn with_favorites_menu<'a>(
+        &'a self,
+        frame: Element<'a, Message>,
+        id: PaneId,
+    ) -> Element<'a, Message> {
+        let Some(cursor) = self.favorites_menu.filter(|_| id == self.active_pane) else {
+            return frame;
+        };
+        let current = self.pane(id).current_dir();
+        let menu =
+            crate::favorites_menu::menu(&self.favorites, &current, cursor).map(Message::Favorites);
+        widget::popover(frame)
+            .popup(menu)
+            // Below the tabs and the path bar, by the file list, like Total
+            // Commander's.
+            .position(widget::popover::Position::Point(cosmic::iced::Point::new(
+                12.0, 72.0,
+            )))
+            .on_close(Message::Favorites(FavoritesMessage::CloseMenu))
+            .into()
     }
 
     fn close_drawer(&mut self) {
@@ -3084,101 +3157,6 @@ impl App {
         widget::settings::view_column(vec![general.into(), theme.into(), programs.into()]).into()
     }
 
-    /// The Favorites side panel. Its text is a step smaller than
-    /// libcosmic's settings defaults, so long folder paths fit.
-    fn favorites_page(&self) -> Element<'_, Message> {
-        let mut saved = widget::Column::new().spacing(2);
-        if self.favorites.is_empty() {
-            saved = saved.push(widget::text(fl!("favorites-empty")).size(FAVORITES_NAME_SIZE));
-        }
-        for (index, favorite) in self.favorites.iter().enumerate() {
-            let is_first = index == 0;
-            let is_last = index + 1 == self.favorites.len();
-            let buttons = widget::Row::new()
-                .spacing(4)
-                .align_y(Alignment::Center)
-                .push(themes::tooltip(
-                    widget::button::icon(widget::icon::from_name("go-up-symbolic"))
-                        .on_press_maybe((!is_first).then_some(Message::MoveFavorite(index, true))),
-                    widget::text(fl!("favorites-move-up")),
-                    widget::tooltip::Position::Top,
-                ))
-                .push(themes::tooltip(
-                    widget::button::icon(widget::icon::from_name("go-down-symbolic"))
-                        .on_press_maybe((!is_last).then_some(Message::MoveFavorite(index, false))),
-                    widget::text(fl!("favorites-move-down")),
-                    widget::tooltip::Position::Top,
-                ))
-                .push(widget::button::standard(fl!("open")).on_press(Message::GoToFavorite(index)))
-                .push(
-                    widget::button::icon(widget::icon::from_name("user-trash-symbolic"))
-                        .on_press(Message::RemoveFavorite(index)),
-                );
-            let names = widget::Column::new()
-                .spacing(2)
-                .width(Length::Fill)
-                .push(widget::text(favorite.name.as_str()).size(FAVORITES_NAME_SIZE))
-                .push(widget::text(favorite.path.display().to_string()).size(FAVORITES_PATH_SIZE));
-            let row = widget::Row::new()
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .push(names)
-                .push(buttons);
-            let highlighted = self.favorite_cursor == Some(index);
-            saved = saved.push(
-                // A click on the row (not its buttons) highlights it; a
-                // double-click opens it in the active panel, like Open.
-                widget::mouse_area(widget::container(row).padding([4, 8]).class(
-                    cosmic::theme::Container::custom(move |theme| {
-                        highlight_style(theme, highlighted)
-                    }),
-                ))
-                .on_press(Message::FocusFavorite(index))
-                .on_double_click(Message::GoToFavorite(index)),
-            );
-        }
-
-        let current = self.pane(self.active_pane).current_dir();
-        let add = widget::Column::new()
-            .spacing(8)
-            .push(widget::text::caption_heading(fl!("favorites-add-current")))
-            .push(widget::text(current.display().to_string()).size(FAVORITES_PATH_SIZE))
-            .push(
-                widget::Row::new()
-                    .spacing(8)
-                    .align_y(Alignment::Center)
-                    .push(
-                        widget::text_input(tab_label(&current), self.favorite_name.as_str())
-                            .id(self.favorite_name_input.clone())
-                            .on_input(Message::FavoriteNameChanged)
-                            .on_submit(|_| Message::AddFavorite)
-                            .size(FAVORITES_NAME_SIZE)
-                            .width(Length::Fill),
-                    )
-                    .push(
-                        widget::button::suggested(fl!("favorites-add"))
-                            .id(self.favorite_add_button.clone())
-                            .on_press(Message::AddFavorite),
-                    )
-                    // Close sits right of Add, in Tab order.
-                    .push(
-                        widget::button::standard(fl!("close"))
-                            .id(self.favorite_close_button.clone())
-                            .on_press(Message::CloseDrawer),
-                    ),
-            );
-
-        widget::Column::new()
-            .spacing(12)
-            .push(widget::text::caption_heading(fl!("favorites-saved")))
-            .push(
-                widget::container(widget::scrollable(saved)).max_height(FAVORITES_LIST_MAX_HEIGHT),
-            )
-            .push(widget::divider::horizontal::light())
-            .push(add)
-            .into()
-    }
-
     /// Windows: Explorer's right-click menu for the pane's selection; runs
     /// the 2fip action it picks (or refreshes after a Windows command).
     #[cfg(windows)]
@@ -3207,6 +3185,7 @@ impl App {
         }
         let detail = queue_detail(&sources, Some(&dest));
         if is_move || self.modifiers.shift() {
+            self.note_color_moves(&sources, &dest);
             self.spawn_operation(OpKind::Move, detail, |cancel, conflict| {
                 fs_ops::ops::move_paths(sources, dest, cancel, conflict)
             })
@@ -3355,6 +3334,7 @@ impl App {
         // Cut items only move once; they're gone from their old place after.
         self.clipboard = None;
         let detail = queue_detail(&sources, Some(&dest));
+        self.note_color_moves(&sources, &dest);
         self.spawn_operation(OpKind::Move, detail, |cancel, conflict| {
             fs_ops::ops::move_paths(sources, dest, cancel, conflict)
         })
@@ -3385,17 +3365,6 @@ impl App {
             1 => widget::button::focus(self.dialog_confirm.clone()),
             _ => widget::button::focus(self.dialog_cancel.clone()),
         }
-    }
-
-    /// Puts the keyboard back in the Favorites panel's name field, with its
-    /// text selected so it can be replaced. Used when the "favorite already
-    /// saved" alert closes, since fixing the name is the likely next step.
-    fn focus_favorite_name(&mut self) -> Task<Message> {
-        self.favorite_focus = FavoriteFocus::NameField;
-        Task::batch([
-            widget::text_input::focus(self.favorite_name_input.clone()),
-            widget::text_input::select_all(self.favorite_name_input.clone()),
-        ])
     }
 
     /// Moves keyboard focus to the Delete dialog's Delete (`true`) or Cancel button.
@@ -3438,7 +3407,8 @@ impl App {
             || self.open_with.is_some()
             || self.details.is_some()
             || self.connect.is_some()
-            || self.favorite_alert.is_some()
+            || self.favorites_config.is_some()
+            || self.folder_color_picker.is_some()
     }
 
     /// True while any modal dialog is showing.
@@ -3467,9 +3437,12 @@ impl App {
             OpKind::Copy => self.spawn_operation(kind, detail, |cancel, conflict| {
                 fs_ops::ops::copy(sources, dest, cancel, conflict)
             }),
-            OpKind::Move => self.spawn_operation(kind, detail, |cancel, conflict| {
-                fs_ops::ops::move_paths(sources, dest, cancel, conflict)
-            }),
+            OpKind::Move => {
+                self.note_color_moves(&sources, &dest);
+                self.spawn_operation(kind, detail, |cancel, conflict| {
+                    fs_ops::ops::move_paths(sources, dest, cancel, conflict)
+                })
+            }
             OpKind::Delete | OpKind::Compress | OpKind::Unpack => Task::none(),
         }
     }
@@ -3641,10 +3614,12 @@ impl Application for App {
         // Before anything is drawn: every text is looked up in this language.
         localize::set_language(&settings.language);
         let user_dirs = Arc::new(fs_ops::user_dirs::load());
+        let folder_colors = Arc::new(fs_ops::folder_colors::load());
         let options = ListingOptions {
             hide_hidden: settings.hide_hidden_files,
             icon_style: settings.icon_style,
             user_dirs: user_dirs.clone(),
+            folder_colors: folder_colors.clone(),
             show_thumbnails: settings.show_thumbnails,
             row_lines: settings.row_lines,
             font_size: settings.name_font_size,
@@ -3691,18 +3666,13 @@ impl Application for App {
             pending_conflict: None,
             conflict_rename: None,
             favorites: fs_ops::favorites::load(),
-            favorite_name: String::new(),
-            favorite_cursor: None,
-            favorite_focus: FavoriteFocus::List,
-            favorite_alert: None,
+            favorites_menu: None,
+            favorites_config: None,
             find: None,
             connect: None,
             connect_protocols: crate::connect::protocol_names(),
             saved_connections: fs_ops::connections::load(),
             connection_checks: HashMap::new(),
-            favorite_add_button: widget::Id::unique(),
-            favorite_close_button: widget::Id::unique(),
-            favorite_name_input: widget::Id::unique(),
             settings_cursor: 0,
             confirm_delete_button: widget::Id::unique(),
             cancel_delete_button: widget::Id::unique(),
@@ -3730,6 +3700,9 @@ impl Application for App {
             drives: Vec::new(),
             settings,
             user_dirs,
+            folder_colors,
+            color_moves: Vec::new(),
+            folder_color_picker: None,
             drawer: None,
             saved_session: session,
             modifiers: Modifiers::empty(),
@@ -3822,10 +3795,6 @@ impl Application for App {
                 context_drawer::context_drawer(self.settings_page(), Message::CloseDrawer)
                     .title(fl!("settings"))
             }
-            DrawerPage::Favorites => {
-                context_drawer::context_drawer(self.favorites_page(), Message::CloseDrawer)
-                    .title(fl!("favorites"))
-            }
             DrawerPage::Connections => context_drawer::context_drawer(
                 crate::connections_panel::view(&self.saved_connections, &self.connection_checks),
                 Message::CloseDrawer,
@@ -3857,8 +3826,11 @@ impl Application for App {
     }
 
     fn on_escape(&mut self) -> Task<Message> {
-        if self.favorite_alert.take().is_some() {
-            return self.focus_favorite_name();
+        if self.favorites_menu.take().is_some()
+            || self.favorites_config.take().is_some()
+            || self.folder_color_picker.take().is_some()
+        {
+            return Task::none();
         }
         if !self.dialog_open() && self.viewer.take().is_some() {
             return Task::none();
@@ -3932,29 +3904,12 @@ impl Application for App {
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
-        if let Some((index, reason)) = self.favorite_alert {
-            let favorite = self.favorites.get(index)?;
-            let body = match reason {
-                DuplicateReason::Path => {
-                    fl!("favorites-duplicate-path", name = favorite.name.as_str())
-                }
-                DuplicateReason::Name => fl!(
-                    "favorites-duplicate-name",
-                    name = favorite.name.as_str(),
-                    path = favorite.path.display().to_string()
-                ),
-            };
-            return Some(
-                widget::dialog()
-                    .title(fl!("favorites-duplicate-title"))
-                    .body(body)
-                    .primary_action(
-                        widget::button::standard(fl!("close"))
-                            .id(self.dialog_confirm.clone())
-                            .on_press(Message::CloseFavoriteAlert),
-                    )
-                    .into(),
-            );
+        if let Some(folders) = &self.folder_color_picker {
+            return Some(self.folder_color_dialog(folders));
+        }
+
+        if let Some(config) = &self.favorites_config {
+            return Some(crate::favorites_menu::config_dialog(config).map(Message::Favorites));
         }
 
         if let Some(rename) = &self.conflict_rename {
@@ -4310,15 +4265,13 @@ impl Application for App {
 
         let panes = widget::Row::new()
             .spacing(PANE_GAP)
-            .push(pane_frame(
-                left,
+            .push(self.with_favorites_menu(
+                pane_frame(left, PaneId::Left, self.active_pane == PaneId::Left),
                 PaneId::Left,
-                self.active_pane == PaneId::Left,
             ))
-            .push(pane_frame(
-                right,
+            .push(self.with_favorites_menu(
+                pane_frame(right, PaneId::Right, self.active_pane == PaneId::Right),
                 PaneId::Right,
-                self.active_pane == PaneId::Right,
             ))
             .width(Length::Fill)
             .height(Length::Fill);

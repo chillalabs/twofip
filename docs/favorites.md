@@ -4,28 +4,39 @@ title: Favorites
 ---
 
 Favorites are folders you visit often, with a name of your choice (Total
-Commander calls them the *hotlist*). Open them with
-<kbd>Ctrl</kbd>+<kbd>D</kbd> or **View → Favorites**; they appear in a panel
-on the right.
+Commander calls them the *directory hotlist*).
 
-## Adding a folder
+## The favorites menu
 
-At the bottom of the panel, **Add the current folder** shows the active
-panel's folder. Type a name (or leave it empty to use the folder's name) and
-press **Add** or <kbd>Enter</kbd>.
+Press <kbd>Ctrl</kbd>+<kbd>D</kbd> (or **View → Favorites**): a small menu
+opens at the top left of the active panel, with:
 
-## Using favorites
+- **your favorites**: the one you're in has a tick. Pick one to go there.
+- **Add current folder** / **Remove current folder**: adds the active
+  panel's folder to the list, or removes it if it's already there.
+- **Configure…**: edit the whole list (see below).
 
 | To | Do |
 |---|---|
-| Open one in the active panel | **Open**, double-click its row, or <kbd>Enter</kbd> |
-| Move between favorites | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Tab</kbd>, <kbd>Home</kbd> / <kbd>End</kbd> |
-| Reorder | the arrow buttons, or <kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> |
-| Remove one | the trash button, or <kbd>Delete</kbd> |
-| Close the panel | <kbd>Esc</kbd>, its **×**, or **Close** |
+| Move in the menu | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Home</kbd> / <kbd>End</kbd> |
+| Open the highlighted entry | <kbd>Enter</kbd> or a click |
+| Add / remove the current folder | <kbd>-</kbd> |
+| Configure… | <kbd>*</kbd> |
+| Close the menu | <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>D</kbd>, or a click outside it |
 
-<kbd>Tab</kbd> goes through the favorites, then the name field, **Add** and
-**Close**.
+## Configure favorites
+
+**Configure…** opens a dialog with the list on the left:
+
+- **Add current folder** adds the active panel's folder below the selected
+  favorite (or selects it, if it's already in the list).
+- **Delete**, **Move up** and **Move down** act on the selected favorite.
+- Below the list, change the selected favorite's **Title** and **Folder**.
+  The folder button next to it puts in the active panel's folder.
+
+Changes are saved only with **OK**; **Cancel** (or <kbd>Esc</kbd>) leaves the
+list as it was. A favorite without a folder is dropped, and an empty title
+becomes the folder's name.
 
 Favorites can point to server folders too; open the connection first (see
 [Servers and connections](connections.html)).

@@ -352,3 +352,30 @@ settings-editor-description = Die App, in der F4 Dateien öffnet. Dateien auf ei
 editor-system-default = Texteditor des Systems
 notice-uploaded = { $name } wurde auf dem Server gespeichert.
 notice-upload-failed = { $name } konnte nicht auf dem Server gespeichert werden: { $error }
+
+# Favorites menu (Ctrl+D) and Configure dialog
+favorites-remove-current = Aktuellen Ordner entfernen
+favorites-configure = Konfigurieren…
+favorites-configure-title = Favoriten konfigurieren
+favorites-add-item = Aktuellen Ordner hinzufügen
+favorites-delete-item = Löschen
+favorites-up = Nach oben
+favorites-down = Nach unten
+favorites-title = Titel
+favorites-folder = Ordner
+favorites-use-current = Ordner des aktiven Bereichs verwenden
+ok = OK
+
+# Folder colors (right-click → Folder color)
+folder-color-ellipsis = Ordnerfarbe…
+folder-color-one = Farbe für „{ $name }“
+folder-color-many = Farbe für { $count } Ordner
+folder-color-default = Standard
+color-red = Rot
+color-orange = Orange
+color-yellow = Gelb
+color-green = Grün
+color-blue = Blau
+color-purple = Lila
+color-pink = Rosa
+color-grey = Grau

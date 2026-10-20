@@ -1129,6 +1129,7 @@ mod tests {
                 hide_hidden: false,
                 icon_style: fs_ops::settings::IconStyle::Colorful,
                 user_dirs: std::sync::Arc::new(HashMap::new()),
+                folder_colors: Default::default(),
                 show_thumbnails: false,
                 row_lines: false,
                 font_size: fs_ops::settings::FontSize::Medium,

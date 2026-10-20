@@ -44,6 +44,7 @@ pub fn item_menu(
             "disk-usage-analyzer-symbolic",
             Action::CalculateSize,
         ));
+        items.push(folder_color_item(|action| action));
     }
     items.extend([
         MenuItem::Divider,
@@ -86,6 +87,35 @@ pub fn item_menu(
     ]);
 
     Some(menu::items(keybinds, items))
+}
+
+/// "Folder color…" (opens the color picker), with a color sample as its
+/// icon. `wrap` turns the action into the menu's own action type.
+pub fn folder_color_item<A: cosmic::widget::menu::Action>(
+    wrap: impl Fn(Action) -> A,
+) -> MenuItem<A, String> {
+    MenuItem::Button(
+        fl!("folder-color-ellipsis"),
+        Some(crate::icon_sets::color_swatch(
+            fs_ops::folder_colors::FolderColor::Blue,
+        )),
+        wrap(Action::FolderColor),
+    )
+}
+
+/// A folder color's name, in the UI language.
+pub fn color_name(color: fs_ops::folder_colors::FolderColor) -> String {
+    use fs_ops::folder_colors::FolderColor;
+    match color {
+        FolderColor::Red => fl!("color-red"),
+        FolderColor::Orange => fl!("color-orange"),
+        FolderColor::Yellow => fl!("color-yellow"),
+        FolderColor::Green => fl!("color-green"),
+        FolderColor::Blue => fl!("color-blue"),
+        FolderColor::Purple => fl!("color-purple"),
+        FolderColor::Pink => fl!("color-pink"),
+        FolderColor::Grey => fl!("color-grey"),
+    }
 }
 
 /// The right-click menu for empty space in a file listing.

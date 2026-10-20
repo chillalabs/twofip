@@ -63,6 +63,23 @@ file already exists, 2fip asks: **Replace**, **Skip**, the same for all,
   renames the selected item.
 - **<kbd>F7</kbd>** creates a new folder.
 
+## Folder colors
+
+Give any folder a color to find it at a glance: right-click it (or select
+folders and use **Edit**) → **Folder color…**. A small window shows the
+colors (red, orange, yellow, green, blue, purple, pink and grey): click one.
+**Default** takes the color away; <kbd>Esc</kbd> or **Cancel** leaves it.
+
+- Colors show in both panels, the folder tree and Folder Size, with the
+  Vivid, Windows style and macOS style icons, and with your icon theme
+  (Colorful). The Monochrome style has no colors.
+- A folder renamed or moved **with 2fip** keeps its color.
+- They're 2fip's own: saved in `folder-colors.json` next to the settings,
+  nothing is written into the folders, and other file managers don't show
+  them.
+- Special folders (Documents, Downloads…) can get a color too; they keep
+  their symbol.
+
 ## Deleting
 
 - **<kbd>F8</kbd>** or **<kbd>Delete</kbd>** moves the selection **to the

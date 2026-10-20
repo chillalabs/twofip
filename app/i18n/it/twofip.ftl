@@ -352,3 +352,30 @@ settings-editor-description = L'app in cui F4 apre i file. I file su un server v
 editor-system-default = Editor di testo del sistema
 notice-uploaded = { $name } salvato sul server.
 notice-upload-failed = Impossibile salvare { $name } sul server: { $error }
+
+# Favorites menu (Ctrl+D) and Configure dialog
+favorites-remove-current = Rimuovi la cartella attuale
+favorites-configure = Configura…
+favorites-configure-title = Configura preferiti
+favorites-add-item = Aggiungi la cartella attuale
+favorites-delete-item = Elimina
+favorites-up = Sposta su
+favorites-down = Sposta giù
+favorites-title = Titolo
+favorites-folder = Cartella
+favorites-use-current = Usa la cartella del pannello attivo
+ok = OK
+
+# Folder colors (right-click → Folder color)
+folder-color-ellipsis = Colore cartella…
+folder-color-one = Colore di “{ $name }”
+folder-color-many = Colore di { $count } cartelle
+folder-color-default = Predefinito
+color-red = Rosso
+color-orange = Arancione
+color-yellow = Giallo
+color-green = Verde
+color-blue = Blu
+color-purple = Viola
+color-pink = Rosa
+color-grey = Grigio

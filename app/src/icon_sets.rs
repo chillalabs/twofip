@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use cosmic::widget::icon;
+use fs_ops::folder_colors::FolderColor;
 use fs_ops::user_dirs::UserDir;
 
 /// Which of 2fip's icon sets.
@@ -210,6 +211,32 @@ fn folder_style(dir: Option<UserDir>) -> (&'static str, &'static str, &'static s
     }
 }
 
+/// A folder color the user picked: (front, back).
+fn color_pair(color: FolderColor) -> (&'static str, &'static str) {
+    match color {
+        FolderColor::Red => ("#EF4444", "#C42B2B"),
+        FolderColor::Orange => ("#F97316", "#C9560B"),
+        FolderColor::Yellow => ("#FBBF24", "#D99A0B"),
+        FolderColor::Green => ("#22C55E", "#16964A"),
+        FolderColor::Blue => ("#3B82F6", "#2563C9"),
+        FolderColor::Purple => ("#A855F7", "#7E37C4"),
+        FolderColor::Pink => ("#EC4899", "#BE2A75"),
+        FolderColor::Grey => ("#94A3B8", "#6B7A8F"),
+    }
+}
+
+/// `#rrggbb` moved `amount` (0..1) of the way towards white.
+fn lighter(hex: &str, amount: f32) -> String {
+    let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).unwrap_or(0) as f32;
+    let mix = |value: f32| (value + (255.0 - value) * amount).round() as u8;
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        mix(channel(1)),
+        mix(channel(3)),
+        mix(channel(5))
+    )
+}
+
 fn svg(defs: &str, body: &str) -> String {
     format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><defs>{defs}</defs>{body}</svg>"#
@@ -252,18 +279,30 @@ fn file_svg(set: IconSet, category: FileCategory) -> String {
     }
 }
 
-fn folder_svg(set: IconSet, dir: Option<UserDir>) -> String {
+fn folder_svg(set: IconSet, dir: Option<UserDir>, color: Option<FolderColor>) -> String {
     let (front, back, symbol) = folder_style(dir);
+    let picked = color.map(color_pair);
     match set {
-        IconSet::Vivid => folder_frame(
-            "",
-            &format!(
-                r##"<path d="{FOLDER_BACK}" fill="{back}"/><path d="{FOLDER_FRONT}" fill="{front}"/><path d="M8 19h32" stroke="#fff" stroke-opacity=".35" stroke-width="1.5" stroke-linecap="round"/>"##
-            ),
-        ),
+        IconSet::Vivid => {
+            let (front, back) = picked.unwrap_or((front, back));
+            folder_frame(
+                "",
+                &format!(
+                    r##"<path d="{FOLDER_BACK}" fill="{back}"/><path d="{FOLDER_FRONT}" fill="{front}"/><path d="M8 19h32" stroke="#fff" stroke-opacity=".35" stroke-width="1.5" stroke-linecap="round"/>"##
+                ),
+            )
+        }
         IconSet::Classic => {
-            let defs =
-                gradient("front", "#ffd767", "#f7b731") + &gradient("back", "#e9a51a", "#d48c0c");
+            let defs = match picked {
+                Some((front, back)) => {
+                    gradient("front", &lighter(front, 0.35), front)
+                        + &gradient("back", &lighter(back, 0.15), back)
+                }
+                None => {
+                    gradient("front", "#ffd767", "#f7b731")
+                        + &gradient("back", "#e9a51a", "#d48c0c")
+                }
+            };
             let mut body = format!(
                 r#"<path d="{FOLDER_BACK}" fill="url(#back)"/><path d="{FOLDER_FRONT}" fill="url(#front)"/>"#
             );
@@ -278,15 +317,24 @@ fn folder_svg(set: IconSet, dir: Option<UserDir>) -> String {
             folder_frame(&defs, &body)
         }
         IconSet::Soft => {
-            let defs =
-                gradient("front", "#8fcdfb", "#57aaf0") + &gradient("back", "#5eaaf0", "#3f8fde");
+            let defs = match picked {
+                Some((front, back)) => {
+                    gradient("front", &lighter(front, 0.4), &lighter(front, 0.1))
+                        + &gradient("back", &lighter(back, 0.2), back)
+                }
+                None => {
+                    gradient("front", "#8fcdfb", "#57aaf0")
+                        + &gradient("back", "#5eaaf0", "#3f8fde")
+                }
+            };
+            let embossed = picked.map_or("#2a7fd0", |(_, back)| back);
             let mut body = format!(
                 r##"<path d="{FOLDER_BACK}" fill="url(#back)"/><path d="{FOLDER_FRONT}" fill="url(#front)"/><path d="M7 16h34" stroke="#fff" stroke-opacity=".5" stroke-width="1.2" stroke-linecap="round"/>"##
             );
             if !symbol.is_empty() {
                 body += &format!(
                     r#"<g opacity=".55">{}</g>"#,
-                    symbol.replace("{c}", "#2a7fd0")
+                    symbol.replace("{c}", embossed)
                 );
             }
             folder_frame(&defs, &body)
@@ -307,8 +355,9 @@ fn folder_frame(defs: &str, body: &str) -> String {
 /// What an icon shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Key {
-    Folder(IconSet, Option<UserDir>),
+    Folder(IconSet, Option<UserDir>, Option<FolderColor>),
     File(IconSet, FileCategory),
+    Swatch(FolderColor),
 }
 
 /// Icon handles are built once and shared (they hold the SVG data).
@@ -320,16 +369,30 @@ fn cached(key: Key) -> icon::Handle {
         .entry(key)
         .or_insert_with(|| {
             let svg = match key {
-                Key::Folder(set, dir) => folder_svg(set, dir),
+                Key::Folder(set, dir, color) => folder_svg(set, dir, color),
                 Key::File(set, category) => file_svg(set, category),
+                Key::Swatch(color) => svg(
+                    "",
+                    &format!(
+                        r##"<circle cx="24" cy="24" r="17" fill="{}" stroke="#000" stroke-opacity=".2" stroke-width="1.5"/>"##,
+                        color_pair(color).0
+                    ),
+                ),
             };
             icon::from_svg_bytes(svg.into_bytes())
         })
         .clone()
 }
 
-pub fn folder(set: IconSet, dir: Option<UserDir>) -> icon::Handle {
-    cached(Key::Folder(set, dir))
+/// A folder: special folders (`dir`) get their symbol, and a color the
+/// user picked replaces the set's folder color.
+pub fn folder(set: IconSet, dir: Option<UserDir>, color: Option<FolderColor>) -> icon::Handle {
+    cached(Key::Folder(set, dir, color))
+}
+
+/// A round sample of `color`, for the Folder color menu.
+pub fn color_swatch(color: FolderColor) -> icon::Handle {
+    cached(Key::Swatch(color))
 }
 
 pub fn file(set: IconSet, mime: Option<&str>, name: &str) -> icon::Handle {
@@ -407,7 +470,18 @@ mod tests {
             html += &format!("<h3>{set:?}</h3><div>");
             let svgs = DIRS
                 .iter()
-                .map(|dir| folder_svg(set, *dir))
+                .map(|dir| folder_svg(set, *dir, None))
+                .chain(
+                    FolderColor::ALL
+                        .iter()
+                        .map(|color| folder_svg(set, None, Some(*color))),
+                )
+                // A special folder in a picked color keeps its symbol.
+                .chain([folder_svg(
+                    set,
+                    Some(UserDir::Documents),
+                    Some(FolderColor::Red),
+                )])
                 .chain(CATEGORIES.iter().map(|category| file_svg(set, *category)));
             for svg in svgs {
                 assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));

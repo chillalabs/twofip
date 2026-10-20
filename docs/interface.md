@@ -120,7 +120,7 @@ The buttons at the bottom do the same as the keys:
 
 ## Side panels
 
-**Settings** (<kbd>Ctrl</kbd>+<kbd>,</kbd>), **Favorites**
-(<kbd>Ctrl</kbd>+<kbd>D</kbd>), **Connections** and **About** open on the
-right. While one is open it has the keyboard; <kbd>Esc</kbd> or its **×**
+**Settings** (<kbd>Ctrl</kbd>+<kbd>,</kbd>), **Connections** and **About**
+open on the right. ([Favorites](favorites.html), <kbd>Ctrl</kbd>+<kbd>D</kbd>,
+are a small menu over the active panel instead.) While one is open it has the keyboard; <kbd>Esc</kbd> or its **×**
 closes it.

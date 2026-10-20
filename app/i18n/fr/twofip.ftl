@@ -352,3 +352,30 @@ settings-editor-description = L'application dans laquelle F4 ouvre les fichiers.
 editor-system-default = Éditeur de texte du système
 notice-uploaded = { $name } a été enregistré sur le serveur.
 notice-upload-failed = Impossible d'enregistrer { $name } sur le serveur : { $error }
+
+# Favorites menu (Ctrl+D) and Configure dialog
+favorites-remove-current = Retirer le dossier actuel
+favorites-configure = Configurer…
+favorites-configure-title = Configurer les favoris
+favorites-add-item = Ajouter le dossier actuel
+favorites-delete-item = Supprimer
+favorites-up = Monter
+favorites-down = Descendre
+favorites-title = Titre
+favorites-folder = Dossier
+favorites-use-current = Utiliser le dossier du panneau actif
+ok = OK
+
+# Folder colors (right-click → Folder color)
+folder-color-ellipsis = Couleur du dossier…
+folder-color-one = Couleur de « { $name } »
+folder-color-many = Couleur de { $count } dossiers
+folder-color-default = Par défaut
+color-red = Rouge
+color-orange = Orange
+color-yellow = Jaune
+color-green = Vert
+color-blue = Bleu
+color-purple = Violet
+color-pink = Rose
+color-grey = Gris

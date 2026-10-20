@@ -107,6 +107,9 @@ pub enum Action {
     /// The Connections side panel (saved and open server connections).
     Connections,
     Quit,
+    /// Right-click → Folder color…: the color picker for the selected
+    /// folders.
+    FolderColor,
 }
 
 impl MenuAction for Action {
