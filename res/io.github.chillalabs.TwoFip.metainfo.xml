@@ -65,6 +65,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.17" date="2026-10-20">
+      <description>
+        <p>Icons everywhere:</p>
+        <ul>
+          <li>Outside COSMIC (Fedora, Ubuntu, GNOME, KDE) the toolbar, buttons and file icons no longer go missing: 2fip uses the desktop's icon theme and has its own icons as a fallback</li>
+          <li>Windows: Folder color… in the right-click menu</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.16" date="2026-10-20">
       <description>
         <p>Favorites like Total Commander, and folder colors:</p>
