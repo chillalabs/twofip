@@ -156,7 +156,11 @@ fn icon_handle(
     options: &ListingOptions,
 ) -> icon::Handle {
     // 2fip's own icon sets (symbolic links keep the theme's link emblem).
+    // Without an icon theme that has file icons, Colorful uses Vivid.
     let own_set = match options.icon_style {
+        IconStyle::Colorful if !cfg!(windows) && !crate::fallback_icons::themed_file_icons() => {
+            Some(crate::icon_sets::IconSet::Vivid)
+        }
         IconStyle::Vivid => Some(crate::icon_sets::IconSet::Vivid),
         IconStyle::Classic => Some(crate::icon_sets::IconSet::Classic),
         IconStyle::Soft => Some(crate::icon_sets::IconSet::Soft),

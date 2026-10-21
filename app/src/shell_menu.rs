@@ -16,9 +16,9 @@ use windows::Win32::UI::Shell::{
     CMF_CANRENAME, CMF_EXTENDEDVERBS, CMF_NORMAL, CMINVOKECOMMANDINFO, GCS_VERBA,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, TrackPopupMenuEx,
-    SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_DRAWITEM, WM_INITMENUPOPUP, WM_MEASUREITEM,
-    WM_MENUCHAR,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, TrackPopupMenuEx,
+    MF_SEPARATOR, MF_STRING, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_DRAWITEM,
+    WM_INITMENUPOPUP, WM_MEASUREITEM, WM_MENUCHAR,
 };
 
 use crate::keybinds::Action;
@@ -27,6 +27,8 @@ use crate::keybinds::Action;
 const FIRST_ID: u32 = 1;
 const LAST_ID: u32 = 0x7fff;
 const SUBCLASS_ID: usize = 0x2f1b;
+/// 2fip's own entry, after the shell's (outside their id range).
+const FOLDER_COLOR_ID: u32 = LAST_ID + 1;
 
 thread_local! {
     /// The menu being shown, for its submenus ("Open with", "Send to"),
@@ -37,10 +39,12 @@ thread_local! {
 /// Shows Explorer's menu for `paths` (all in one folder) at the mouse
 /// pointer. Returns the 2fip action to run: the chosen Cut/Copy/Paste/
 /// Rename/Delete, or Refresh after a command Windows ran itself.
-pub fn show(paths: &[PathBuf]) -> Option<Action> {
+/// `folder_color`: the label of 2fip's own "Folder color…" entry, added
+/// at the end when folders are selected.
+pub fn show(paths: &[PathBuf], folder_color: Option<String>) -> Option<Action> {
     // SAFETY: plain shell/COM calls on the UI thread; every pointer comes
     // from the shell and is freed by `Pidls` or the COM wrappers.
-    match unsafe { show_menu(paths) } {
+    match unsafe { show_menu(paths, folder_color) } {
         Ok(action) => action,
         Err(err) => {
             eprintln!("Explorer menu: {err}");
@@ -77,7 +81,10 @@ impl Drop for Pidls {
     }
 }
 
-unsafe fn show_menu(paths: &[PathBuf]) -> windows::core::Result<Option<Action>> {
+unsafe fn show_menu(
+    paths: &[PathBuf],
+    folder_color: Option<String>,
+) -> windows::core::Result<Option<Action>> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let hwnd = GetForegroundWindow();
@@ -108,6 +115,16 @@ unsafe fn show_menu(paths: &[PathBuf]) -> windows::core::Result<Option<Action>> 
             return Err(err);
         }
 
+        if let Some(label) = folder_color {
+            let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, windows::core::PCWSTR::null());
+            let _ = AppendMenuW(
+                hmenu,
+                MF_STRING,
+                FOLDER_COLOR_ID as usize,
+                &HSTRING::from(label.as_str()),
+            );
+        }
+
         let mut point = POINT::default();
         GetCursorPos(&mut point)?;
         ACTIVE.with(|active| *active.borrow_mut() = Some(menu.clone()));
@@ -124,7 +141,9 @@ unsafe fn show_menu(paths: &[PathBuf]) -> windows::core::Result<Option<Action>> 
         let _ = RemoveWindowSubclass(hwnd, Some(forward_menu_messages), SUBCLASS_ID);
         ACTIVE.with(|active| *active.borrow_mut() = None);
 
-        let action = if chosen >= FIRST_ID {
+        let action = if chosen == FOLDER_COLOR_ID {
+            Some(Action::FolderColor)
+        } else if chosen >= FIRST_ID {
             run_command(&menu, hwnd, chosen - FIRST_ID)
         } else {
             None

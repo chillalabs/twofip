@@ -9,6 +9,7 @@ mod connections_panel;
 mod context_menu;
 mod dnd;
 mod drag_start;
+mod fallback_icons;
 mod favorites_menu;
 mod file_item;
 mod find;
@@ -34,5 +35,7 @@ mod watcher;
 mod windows;
 
 fn main() -> cosmic::iced::Result {
+    // Before any icon is looked up.
+    fallback_icons::install();
     cosmic::app::run::<app::App>(cosmic::app::Settings::default(), ())
 }

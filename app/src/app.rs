@@ -3163,7 +3163,16 @@ impl App {
     fn show_shell_menu(&mut self, id: PaneId) -> Task<Message> {
         let paths = self.pane(id).selected_paths();
         let paste_destination = (paths.len() == 1 && paths[0].is_dir()).then(|| paths[0].clone());
-        match (crate::shell_menu::show(&paths), paste_destination) {
+        // 2fip's own "Folder color…" goes at the end of Explorer's menu.
+        let pane = self.pane(id);
+        let folder_color = paths
+            .iter()
+            .any(|path| pane.is_listed_folder(path))
+            .then(|| fl!("folder-color-ellipsis"));
+        match (
+            crate::shell_menu::show(&paths, folder_color),
+            paste_destination,
+        ) {
             (Some(Action::Paste), Some(dest)) => self.paste_to(dest),
             (Some(action), _) => self.handle_action(action),
             (None, _) => Task::none(),
@@ -3602,6 +3611,8 @@ impl Application for App {
     }
 
     fn init(mut core: Core, _flags: Self::Flags) -> (Self, Task<Message>) {
+        // Outside COSMIC: the desktop's icon theme when COSMIC's is missing.
+        crate::fallback_icons::choose_theme();
         // libcosmic's built-in keyboard navigation moves widget focus on Tab,
         // which fights our Tab = "switch pane" (and a focused widget then
         // swallows later Tabs). Turn it off; Escape is handled in `Message::Key`.
