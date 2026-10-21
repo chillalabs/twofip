@@ -50,6 +50,10 @@ details.
 - **Clipboard:** <kbd>Ctrl</kbd>+<kbd>C</kbd> (copy) or
   <kbd>Ctrl</kbd>+<kbd>X</kbd> (cut), then <kbd>Ctrl</kbd>+<kbd>V</kbd> in any
   folder.
+- **Duplicates:** <kbd>Ctrl</kbd>+<kbd>C</kbd> then <kbd>Ctrl</kbd>+<kbd>V</kbd>
+  in the **same folder** makes a copy next to the original, named
+  `readme - Copy.txt`, then `readme - Copy (2).txt` and so on (folders too),
+  as in Windows Explorer.
 - **Drag and drop** between the panels, into a folder, or from and to other
   apps. Dropping copies; hold <kbd>Shift</kbd> to move.
 

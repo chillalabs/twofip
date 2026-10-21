@@ -3324,11 +3324,33 @@ impl App {
             return Task::none();
         };
         if !clipboard.cut {
-            let sources = clipboard.paths.clone();
-            let detail = queue_detail(&sources, Some(&dest));
-            return self.spawn_operation(OpKind::Copy, detail, |cancel, conflict| {
-                fs_ops::ops::copy(sources, dest, cancel, conflict)
-            });
+            // Pasted into the folder they came from: duplicates named
+            // "name - Copy", as in Explorer. Anything else is copied.
+            let (same_folder, sources): (Vec<PathBuf>, Vec<PathBuf>) =
+                clipboard.paths.iter().cloned().partition(|path| {
+                    path.parent() == Some(dest.as_path())
+                        && !fs_ops::vfs::is_remote(path)
+                        && !fs_ops::archive_fs::is_inside(path)
+                });
+            let mut tasks = Vec::new();
+            if !same_folder.is_empty() {
+                let detail = queue_detail(&same_folder, Some(&dest));
+                let suffix = fl!("copy-suffix");
+                tasks.push(
+                    self.spawn_operation(OpKind::Copy, detail, move |cancel, conflict| {
+                        fs_ops::ops::duplicate(same_folder, suffix, cancel, conflict)
+                    }),
+                );
+            }
+            if !sources.is_empty() {
+                let detail = queue_detail(&sources, Some(&dest));
+                tasks.push(
+                    self.spawn_operation(OpKind::Copy, detail, |cancel, conflict| {
+                        fs_ops::ops::copy(sources, dest, cancel, conflict)
+                    }),
+                );
+            }
+            return Task::batch(tasks);
         }
         // Moving something into the folder it's already in is a no-op.
         let sources: Vec<PathBuf> = clipboard
@@ -3790,6 +3812,9 @@ impl Application for App {
                 && !fs_ops::vfs::is_remote(&other.current_dir()),
             folder_tree: self.settings.folder_tree,
             quick_view: self.quick_view.is_some(),
+            can_back: pane.can_go_back(),
+            can_forward: pane.can_go_forward(),
+            can_up: pane.can_go_up(),
         };
         menu_bar(
             &self.keybinds,

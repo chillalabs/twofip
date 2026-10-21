@@ -1054,6 +1054,30 @@ impl PaneState {
         self.path_edit.is_some()
     }
 
+    /// Whether the active tab has a folder to go back / forward to (the
+    /// toolbar greys the buttons out otherwise).
+    pub fn can_go_back(&self) -> bool {
+        self.tabs
+            .active_data::<TabState>()
+            .is_some_and(|tab_state| !tab_state.back.is_empty())
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.tabs
+            .active_data::<TabState>()
+            .is_some_and(|tab_state| !tab_state.forward.is_empty())
+    }
+
+    /// Up works below the top folder, and in search results (back to the
+    /// searched folder).
+    pub fn can_go_up(&self) -> bool {
+        self.tabs
+            .active_data::<TabState>()
+            .is_some_and(|tab_state| {
+                tab_state.results.is_some() || fs_ops::vfs::parent(&tab_state.current_dir).is_some()
+            })
+    }
+
     /// The entry under the keyboard cursor in the active tab.
     pub fn cursor_path(&self) -> Option<PathBuf> {
         self.tabs.active_data::<TabState>()?.cursor_path()
@@ -1249,26 +1273,6 @@ impl PaneState {
             .align_y(cosmic::iced::Alignment::Center)
             .push_maybe(drive_menu(tab_state, drives))
             .push_maybe(eject_button(tab_state, drives))
-            .push(nav_button(
-                widget::icon::from_name("go-previous-symbolic").handle(),
-                fl!("tooltip-back"),
-                PaneMessage::GoBack,
-            ))
-            .push(nav_button(
-                widget::icon::from_name("go-next-symbolic").handle(),
-                fl!("tooltip-forward"),
-                PaneMessage::GoForward,
-            ))
-            .push(
-                // Arrow + "[..]", like Total Commander's parent-folder entry.
-                themes::tooltip(
-                    widget::button::text("[..]")
-                        .leading_icon(parent_folder_icon())
-                        .on_press(PaneMessage::GoUp),
-                    widget::text(fl!("tooltip-up")),
-                    widget::tooltip::Position::Top,
-                ),
-            )
             .push(nav_button(
                 widget::icon::from_name("list-add-symbolic").handle(),
                 fl!("tooltip-new-tab"),
@@ -2404,7 +2408,7 @@ pub fn home_dir() -> PathBuf {
 
 /// "Up one level" arrow (left, then up). The icon theme has no such icon, so it ships
 /// with the app; drawn as a symbolic icon so it follows the theme's colors.
-fn parent_folder_icon() -> widget::icon::Handle {
+pub fn parent_folder_icon() -> widget::icon::Handle {
     let mut handle = widget::icon::from_svg_bytes(
         &include_bytes!("../resources/icons/go-parent-folder-symbolic.svg")[..],
     );

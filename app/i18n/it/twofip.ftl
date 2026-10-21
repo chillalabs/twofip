@@ -379,3 +379,10 @@ color-blue = Blu
 color-purple = Viola
 color-pink = Rosa
 color-grey = Grigio
+
+# Ctrl+C, Ctrl+V in the same folder: "readme - Copy.txt"
+copy-suffix = Copia
+
+# Toolbar: list / grid view
+tooltip-list-view = Vista elenco (Ctrl+1)
+tooltip-grid-view = Vista griglia (Ctrl+2)

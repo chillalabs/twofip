@@ -167,9 +167,6 @@ pub fn menu_bar<'a>(
     .item_height(ItemHeight::Dynamic(40))
     .item_width(ItemWidth::Uniform(260))
     .spacing(4.0);
-    let separator = widget::container(widget::divider::vertical::default())
-        .height(Length::Fixed(20.0))
-        .padding([0, 4]);
     // The tooltip goes below: the buttons sit at the top of the window, and
     // libcosmic's default (above) would cover the title bar.
     // Plain icon buttons, no background; one that can't act now is greyed
@@ -183,12 +180,22 @@ pub fn menu_bar<'a>(
     };
     let svg = |bytes: &'static [u8]| icon::from_svg_bytes(bytes).symbolic(true);
 
+    // A short vertical line between groups of buttons.
+    let separator = || -> Element<'a, Message> {
+        widget::container(
+            widget::container(widget::divider::vertical::default())
+                .height(Length::Fixed(20.0))
+                .padding([0, 4]),
+        )
+        .height(Length::Fill)
+        .align_y(Alignment::Center)
+        .into()
+    };
+    let list_view = view_mode == ViewMode::List;
+
     vec![
         bar.into(),
-        widget::container(separator)
-            .height(Length::Fill)
-            .align_y(Alignment::Center)
-            .into(),
+        separator(),
         tool(
             icon::from_name("view-refresh-symbolic").handle(),
             fl!("tooltip-refresh"),
@@ -196,18 +203,52 @@ pub fn menu_bar<'a>(
             true,
         )
         .into(),
+        separator(),
+        // The view the panel already has is greyed out.
+        tool(
+            icon::from_name("view-list-symbolic").handle(),
+            fl!("tooltip-list-view"),
+            Action::ListView,
+            !list_view,
+        )
+        .into(),
+        tool(
+            icon::from_name("view-grid-symbolic").handle(),
+            fl!("tooltip-grid-view"),
+            Action::GridView,
+            list_view,
+        )
+        .into(),
+        tree_button(tools.folder_tree),
+        separator(),
+        // Back, Forward and Up act on the active panel.
+        tool(
+            icon::from_name("go-previous-symbolic").handle(),
+            fl!("tooltip-back"),
+            Action::GoBack,
+            tools.can_back,
+        )
+        .into(),
+        tool(
+            icon::from_name("go-next-symbolic").handle(),
+            fl!("tooltip-forward"),
+            Action::GoForward,
+            tools.can_forward,
+        )
+        .into(),
+        tool(
+            crate::pane::parent_folder_icon(),
+            fl!("tooltip-up"),
+            Action::GoUp,
+            tools.can_up,
+        )
+        .into(),
+        separator(),
         tool(
             icon::from_name("system-search-symbolic").handle(),
             fl!("tooltip-find"),
             Action::Find,
             tools.can_find,
-        )
-        .into(),
-        tool(
-            icon::from_name("network-server-symbolic").handle(),
-            fl!("tooltip-connections"),
-            Action::Connections,
-            true,
         )
         .into(),
         tool(
@@ -217,6 +258,14 @@ pub fn menu_bar<'a>(
             tools.can_folder_size,
         )
         .into(),
+        tool(
+            icon::from_name("network-server-symbolic").handle(),
+            fl!("tooltip-connections"),
+            Action::Connections,
+            true,
+        )
+        .into(),
+        separator(),
         tool(
             svg(include_bytes!("../resources/icons/pack.svg")),
             fl!("tooltip-pack"),
@@ -231,7 +280,6 @@ pub fn menu_bar<'a>(
             tools.can_extract,
         )
         .into(),
-        tree_button(tools.folder_tree),
     ]
 }
 
@@ -247,6 +295,10 @@ pub struct Tools {
     pub can_extract: bool,
     pub folder_tree: fs_ops::settings::TreeMode,
     pub quick_view: bool,
+    /// The active panel has somewhere to go back / forward / up to.
+    pub can_back: bool,
+    pub can_forward: bool,
+    pub can_up: bool,
 }
 
 /// "Show hierarchy": its icon shows which panels have the folder tree, and

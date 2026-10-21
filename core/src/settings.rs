@@ -118,9 +118,10 @@ pub enum ColorTheme {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FontSize {
-    /// libcosmic's normal body text size.
+    /// libcosmic's normal body text size, and the largest (the short-lived
+    /// "large" and "larger" load as Medium).
     #[default]
-    #[serde(alias = "default")]
+    #[serde(alias = "default", alias = "large", alias = "larger")]
     Medium,
     Small,
     Smaller,
@@ -387,6 +388,11 @@ mod tests {
         // 9 px, removed again in 0.2.5.
         let old: FontSize = serde_json::from_str(r#""smallest""#).unwrap();
         assert_eq!(old, FontSize::ExtraSmall);
+        // 16 and 18 px, never released: back to the normal size.
+        for name in [r#""large""#, r#""larger""#] {
+            let old: FontSize = serde_json::from_str(name).unwrap();
+            assert_eq!(old, FontSize::Medium);
+        }
     }
 
     #[test]

@@ -15,20 +15,23 @@ The window has a **menu bar** at the top, **two panels** side by side, and the
 | **View** | List view, Grid view, Favorites, Settings |
 | **Help** | Help (<kbd>F1</kbd>), About 2fip |
 
-Next to the menus are the tool buttons:
+Next to the menus are the tool buttons, in groups:
 
 | Button | Does |
 |---|---|
 | **Refresh** (<kbd>Ctrl</kbd>+<kbd>R</kbd>) | re-reads the folders of both panels |
-| **Find files** (<kbd>Ctrl</kbd>+<kbd>F</kbd>) | searches by name (see [Finding files](find.html)) |
-| **Connections** | saved and open server connections |
-| **Folder Size** | what fills a folder or a drive (see [Folder Size](folder-size.html)) |
+| **List view** (<kbd>Ctrl</kbd>+<kbd>1</kbd>) / **Grid view** (<kbd>Ctrl</kbd>+<kbd>2</kbd>) | the active panel's view; the current one is greyed out |
 | **Folder tree** | shows the folder tree beside the left panel, the right, both, or none, in turn |
+| **Back** (<kbd>Alt</kbd>+<kbd>←</kbd>) / **Forward** (<kbd>Alt</kbd>+<kbd>→</kbd>) | through the active panel's history |
+| **Up** (<kbd>Backspace</kbd>) | the active panel's parent folder |
+| **Find files** (<kbd>Ctrl</kbd>+<kbd>F</kbd>) | searches by name (see [Finding files](find.html)) |
+| **Folder Size** | what fills a folder or a drive (see [Folder Size](folder-size.html)) |
+| **Connections** | saved and open server connections |
 | **Pack files** (<kbd>Alt</kbd>+<kbd>F5</kbd>) | packs the selection into an archive in the other panel's folder |
 | **Extract files** (<kbd>Alt</kbd>+<kbd>F9</kbd>) | unpacks the selected archives into the other panel's folder |
 
 A button that can't act right now is greyed out: for example **Extract files**
-only works when an archive is selected. See
+only works when an archive is selected, and **Back** when there's no history. See
 [Working with files](files.html#archives) for packing and extracting.
 
 ## The two panels
@@ -41,9 +44,9 @@ send the active panel's selection **to the other panel's folder**.
 Each panel has, from top to bottom:
 
 1. **Tabs.** See [Tabs](#tabs) below.
-2. **Navigation:** the **drive menu** (see below), Back (<kbd>Alt</kbd>+<kbd>←</kbd>), Forward
-   (<kbd>Alt</kbd>+<kbd>→</kbd>), **[..]** to go up to the parent folder
-   (<kbd>Backspace</kbd>), **+** for a new tab, and the **path bar**.
+2. **Navigation:** the **drive menu** (see below), **+** for a new tab, and
+   the **path bar**. (Back, Forward and Up are in the toolbar at the top and
+   act on the active panel.)
 3. **The file list**, in list or grid view.
 4. **The status line:** how many items the folder has, or how many are
    selected and their total size.
