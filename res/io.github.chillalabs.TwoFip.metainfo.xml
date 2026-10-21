@@ -65,6 +65,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.18" date="2026-10-21">
+      <description>
+        <p>A new toolbar and quick duplicates:</p>
+        <ul>
+          <li>Copy and paste in the same folder makes a duplicate named "name - Copy", as in Windows Explorer</li>
+          <li>The toolbar has Back, Forward and Up for the active panel, and List / Grid view, in groups</li>
+          <li>The panels' bars are simpler: drive menu, new tab and the path</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.17" date="2026-10-20">
       <description>
         <p>Icons everywhere:</p>
