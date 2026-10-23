@@ -65,6 +65,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.19" date="2026-10-23">
+      <description>
+        <p>Smoother dragging and a favorites button:</p>
+        <ul>
+          <li>Dragging one of several selected files takes all of them</li>
+          <li>A star button at the left of each panel's bar opens the favorites</li>
+          <li>The panel's bar has a shaded band, apart from the files</li>
+          <li>The drive menu's tooltip no longer covers the open menu</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.18" date="2026-10-21">
       <description>
         <p>A new toolbar and quick duplicates:</p>
