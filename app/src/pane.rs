@@ -60,6 +60,12 @@ pub enum PaneMessage {
     /// A click on an entry; how it changes the selection depends on the
     /// modifier keys held (see [`SelectMode`]).
     EntrySelected(table::Entity, SelectMode),
+    /// Plain press on an entry that's part of a multi-selection: the
+    /// selection stays, so a drag takes all of it.
+    EntryPressedInSelection(table::Entity),
+    /// The button went up on that entry without a drag: now it alone is
+    /// selected, as with a plain click.
+    EntryReleasedInSelection(table::Entity),
     /// Shift+↓ (`true`) / Shift+↑: extends the selection by one row.
     ExtendSelection(bool),
     /// Space: work out the total size of the selected folders.
@@ -94,6 +100,8 @@ pub enum PaneMessage {
     /// Windows: right button released over a file, show Explorer's menu
     /// for the selection. Handled by the app.
     ShowShellMenu,
+    /// The ★ button: the favorites menu for this panel. Handled by the app.
+    ShowFavorites,
     /// Windows: a drag of these files started; Windows' own drag and drop
     /// takes it from here. Handled by the app.
     #[cfg(windows)]
@@ -173,6 +181,9 @@ pub struct PaneState {
     /// The file listing's scroll area, so keyboard moves can keep the
     /// selected row in view.
     scroll_id: widget::Id,
+    /// A plain press on an already selected entry (see
+    /// [`PaneMessage::EntryPressedInSelection`]).
+    pressed_in_selection: Option<table::Entity>,
     /// The quick filter's text box, so Ctrl+S can focus it.
     filter_input_id: widget::Id,
     /// The path bar's text while it's being edited (`None`: showing the
@@ -231,6 +242,7 @@ impl PaneState {
             tabs,
             options,
             scroll_id: widget::Id::unique(),
+            pressed_in_selection: None,
             filter_input_id: widget::Id::unique(),
             path_edit: None,
             path_edit_error: None,
@@ -321,7 +333,22 @@ impl PaneState {
                 }
                 crate::launch::open(item.path.clone())
             }
+            PaneMessage::EntryPressedInSelection(entity) => {
+                self.pressed_in_selection = Some(entity);
+                Task::none()
+            }
+            PaneMessage::EntryReleasedInSelection(entity) => {
+                // Only after a press on this same entry (a rubber band
+                // ending here doesn't count); a drag never gets here.
+                if self.pressed_in_selection.take() == Some(entity) {
+                    if let Some(tab_state) = self.tabs.active_data_mut::<TabState>() {
+                        tab_state.select_only(entity);
+                    }
+                }
+                Task::none()
+            }
             PaneMessage::EntrySelected(entity, mode) => {
+                self.pressed_in_selection = None;
                 if let Some(tab_state) = self.tabs.active_data_mut::<TabState>() {
                     match mode {
                         SelectMode::Replace => tab_state.select_only(entity),
@@ -408,6 +435,7 @@ impl PaneState {
             PaneMessage::Action(_)
             | PaneMessage::DropFiles { .. }
             | PaneMessage::ShowShellMenu
+            | PaneMessage::ShowFavorites
             | PaneMessage::MountDrive(_)
             | PaneMessage::EjectDrive(_) => Task::none(),
             #[cfg(windows)]
@@ -1271,6 +1299,11 @@ impl PaneState {
         let header = widget::Row::new()
             .spacing(4)
             .align_y(cosmic::iced::Alignment::Center)
+            .push(nav_button(
+                widget::icon::from_name("starred-symbolic").handle(),
+                fl!("tooltip-favorites"),
+                PaneMessage::ShowFavorites,
+            ))
             .push_maybe(drive_menu(tab_state, drives))
             .push_maybe(eject_button(tab_state, drives))
             .push(nav_button(
@@ -1279,6 +1312,23 @@ impl PaneState {
                 PaneMessage::NewTab,
             ))
             .push(self.path_bar(tab_state, is_active));
+        // On a band of its own, so the bar stands apart from the file rows.
+        let header = widget::container(header)
+            .padding([3, 6])
+            .width(Length::Fill)
+            .class(cosmic::theme::Container::custom(|theme| {
+                let cosmic = theme.cosmic();
+                let mut band = cosmic.on_bg_color();
+                band.alpha = 0.07;
+                widget::container::Style {
+                    background: Some(cosmic::iced::Background::Color(band.into())),
+                    border: cosmic::iced::Border {
+                        radius: cosmic.radius_s().into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }));
 
         let content: Element<'_, PaneMessage> = match tab_state {
             None => widget::text(fl!("no-tab-open")).into(),
@@ -1897,10 +1947,7 @@ fn list_view<'a>(
                 tab_state.entries.is_active(entity),
                 item.is_dir() && pane.is_drop_hover(&item.path),
             ));
-        let area = widget::mouse_area(row)
-            .on_press(PaneMessage::EntrySelected(entity, select_mode))
-            .on_double_click(PaneMessage::EntryDoubleClicked(entity))
-            .on_right_press(PaneMessage::EntryRightClicked(entity));
+        let area = entry_clicks(widget::mouse_area(row), tab_state, entity, select_mode);
         let entry = with_item_menu(area, item, keybinds, can_paste);
         let entry = draggable_entry(entry, pane, tab_state, item, DragLook::Row);
         // One child per entry (the rubber band counts them), its line below.
@@ -1975,10 +2022,7 @@ fn grid_view<'a>(
                 selected,
                 item.is_dir() && pane.is_drop_hover(&item.path),
             ));
-        let area = widget::mouse_area(cell)
-            .on_press(PaneMessage::EntrySelected(entity, select_mode))
-            .on_double_click(PaneMessage::EntryDoubleClicked(entity))
-            .on_right_press(PaneMessage::EntryRightClicked(entity));
+        let area = entry_clicks(widget::mouse_area(cell), tab_state, entity, select_mode);
         let entry = with_item_menu(area, item, keybinds, can_paste);
         cells.push(draggable_entry(
             entry,
@@ -2005,6 +2049,29 @@ fn grid_view<'a>(
 
 /// Makes a listing entry draggable (dragging a selected entry drags the
 /// whole selection) and, for folders, a drop target for files.
+/// An entry's clicks: select (by the modifier keys), double-click opens,
+/// right-click for the menu. A plain press on an entry that's part of a
+/// multi-selection keeps the selection (so a drag takes all of it) and
+/// selects just this one on release, if there was no drag.
+fn entry_clicks<'a>(
+    area: widget::MouseArea<'a, PaneMessage, cosmic::Theme, cosmic::Renderer>,
+    tab_state: &TabState,
+    entity: table::Entity,
+    select_mode: SelectMode,
+) -> widget::MouseArea<'a, PaneMessage, cosmic::Theme, cosmic::Renderer> {
+    let in_selection = select_mode == SelectMode::Replace
+        && tab_state.entries.is_active(entity)
+        && tab_state.entries.active().nth(1).is_some();
+    let area = if in_selection {
+        area.on_press(PaneMessage::EntryPressedInSelection(entity))
+            .on_release(PaneMessage::EntryReleasedInSelection(entity))
+    } else {
+        area.on_press(PaneMessage::EntrySelected(entity, select_mode))
+    };
+    area.on_double_click(PaneMessage::EntryDoubleClicked(entity))
+        .on_right_press(PaneMessage::EntryRightClicked(entity))
+}
+
 fn draggable_entry<'a>(
     entry: impl Into<Element<'a, PaneMessage>>,
     pane: &PaneState,
@@ -2326,14 +2393,9 @@ fn drive_menu(
     let icons: Vec<widget::icon::Handle> = drives.iter().map(drive_icon).collect();
     let menu = widget::dropdown(labels, current, move |index| messages[index].clone())
         .icons(std::borrow::Cow::Owned(icons));
-    Some(
-        themes::tooltip(
-            menu,
-            widget::text(fl!("tooltip-drive")),
-            widget::tooltip::Position::Bottom,
-        )
-        .into(),
-    )
+    // No tooltip: it stayed on top of the open menu, and the button already
+    // shows the drive's icon and name with a ▾.
+    Some(menu.into())
 }
 
 /// A drive's icon in the menu: 2fip's own (drawn in the text color), so it

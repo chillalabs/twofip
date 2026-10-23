@@ -68,7 +68,6 @@ status-selected = { $selected } von { $total } ausgewählt ({ $size })
 tooltip-back = Zurück (Alt+←)
 tooltip-forward = Vorwärts (Alt+→)
 tooltip-up = Übergeordneter Ordner (Rücktaste)
-tooltip-drive = Laufwerk
 tooltip-tree-off = Ordnerbaum: aus (Klick zeigt ihn neben dem linken Bereich)
 tooltip-tree-left = Ordnerbaum: linker Bereich (Klick für den rechten Bereich)
 tooltip-tree-right = Ordnerbaum: rechter Bereich (Klick für beide Bereiche)
@@ -386,3 +385,6 @@ copy-suffix = Kopie
 # Toolbar: list / grid view
 tooltip-list-view = Listenansicht (Strg+1)
 tooltip-grid-view = Rasteransicht (Strg+2)
+
+# The ★ button in each panel's bar
+tooltip-favorites = Favoriten (Strg+D)

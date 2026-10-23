@@ -8,8 +8,9 @@ Commander calls them the *directory hotlist*).
 
 ## The favorites menu
 
-Press <kbd>Ctrl</kbd>+<kbd>D</kbd> (or **View → Favorites**): a small menu
-opens at the top left of the active panel, with:
+Press <kbd>Ctrl</kbd>+<kbd>D</kbd>, click the **★** at the left of a panel's
+bar, or use **View → Favorites**: a small menu opens at the top left of the
+panel, with:
 
 - **your favorites**: the one you're in has a tick. Pick one to go there.
 - **Add current folder** / **Remove current folder**: adds the active

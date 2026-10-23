@@ -68,7 +68,6 @@ status-selected = { $selected } of { $total } selected ({ $size })
 tooltip-back = Back (Alt+←)
 tooltip-forward = Forward (Alt+→)
 tooltip-up = Up one folder (Backspace)
-tooltip-drive = Drive
 tooltip-tree-off = Folder tree: off (click to show it beside the left panel)
 tooltip-tree-left = Folder tree: left panel (click for the right panel)
 tooltip-tree-right = Folder tree: right panel (click for both panels)
@@ -386,3 +385,6 @@ copy-suffix = Copy
 # Toolbar: list / grid view
 tooltip-list-view = List view (Ctrl+1)
 tooltip-grid-view = Grid view (Ctrl+2)
+
+# The ★ button in each panel's bar
+tooltip-favorites = Favorites (Ctrl+D)

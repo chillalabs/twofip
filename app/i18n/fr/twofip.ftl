@@ -68,7 +68,6 @@ status-selected = { $selected } sur { $total } sélectionnés ({ $size })
 tooltip-back = Précédent (Alt+←)
 tooltip-forward = Suivant (Alt+→)
 tooltip-up = Dossier parent (Retour arrière)
-tooltip-drive = Lecteur
 tooltip-tree-off = Arborescence : masquée (cliquer pour l’afficher à côté du panneau gauche)
 tooltip-tree-left = Arborescence : panneau gauche (cliquer pour le panneau droit)
 tooltip-tree-right = Arborescence : panneau droit (cliquer pour les deux panneaux)
@@ -386,3 +385,6 @@ copy-suffix = Copie
 # Toolbar: list / grid view
 tooltip-list-view = Vue en liste (Ctrl+1)
 tooltip-grid-view = Vue en grille (Ctrl+2)
+
+# The ★ button in each panel's bar
+tooltip-favorites = Favoris (Ctrl+D)

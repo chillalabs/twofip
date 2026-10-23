@@ -68,7 +68,6 @@ status-selected = { $selected } di { $total } selezionati ({ $size })
 tooltip-back = Indietro (Alt+←)
 tooltip-forward = Avanti (Alt+→)
 tooltip-up = Cartella superiore (Backspace)
-tooltip-drive = Unità
 tooltip-tree-off = Albero delle cartelle: nascosto (clic per mostrarlo accanto al pannello sinistro)
 tooltip-tree-left = Albero delle cartelle: pannello sinistro (clic per il pannello destro)
 tooltip-tree-right = Albero delle cartelle: pannello destro (clic per entrambi i pannelli)
@@ -386,3 +385,6 @@ copy-suffix = Copia
 # Toolbar: list / grid view
 tooltip-list-view = Vista elenco (Ctrl+1)
 tooltip-grid-view = Vista griglia (Ctrl+2)
+
+# The ★ button in each panel's bar
+tooltip-favorites = Preferiti (Ctrl+D)

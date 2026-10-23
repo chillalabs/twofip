@@ -651,6 +651,14 @@ impl App {
                 }));
                 Task::batch(tasks)
             }
+            Message::Pane(id, PaneMessage::ShowFavorites) => {
+                // A click on another panel's ★ opens the menu there.
+                if self.active_pane != id {
+                    self.favorites_menu = None;
+                    self.set_active_pane(id);
+                }
+                self.handle_action(Action::Favorites)
+            }
             Message::Pane(id, PaneMessage::ShowShellMenu) => {
                 self.set_active_pane(id);
                 self.show_shell_menu(id)
@@ -2746,8 +2754,9 @@ impl App {
             .popup(menu)
             // Below the tabs and the path bar, by the file list, like Total
             // Commander's.
+            // Right below the ★ button.
             .position(widget::popover::Position::Point(cosmic::iced::Point::new(
-                12.0, 72.0,
+                12.0, 84.0,
             )))
             .on_close(Message::Favorites(FavoritesMessage::CloseMenu))
             .into()

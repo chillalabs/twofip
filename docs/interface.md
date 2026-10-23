@@ -44,8 +44,9 @@ send the active panel's selection **to the other panel's folder**.
 Each panel has, from top to bottom:
 
 1. **Tabs.** See [Tabs](#tabs) below.
-2. **Navigation:** the **drive menu** (see below), **+** for a new tab, and
-   the **path bar**. (Back, Forward and Up are in the toolbar at the top and
+2. **Navigation**, on a shaded band: **★** for the
+   [favorites](favorites.html), the **drive menu** (see below), **+** for a
+   new tab, and the **path bar**. (Back, Forward and Up are in the toolbar at the top and
    act on the active panel.)
 3. **The file list**, in list or grid view.
 4. **The status line:** how many items the folder has, or how many are

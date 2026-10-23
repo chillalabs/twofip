@@ -70,7 +70,6 @@ status-selected = { $selected } de { $total } seleccionados ({ $size })
 tooltip-back = Atrás (Alt+←)
 tooltip-forward = Adelante (Alt+→)
 tooltip-up = Subir una carpeta (Retroceso)
-tooltip-drive = Unidad
 tooltip-tree-off = Árbol de carpetas: oculto (clic para mostrarlo junto al panel izquierdo)
 tooltip-tree-left = Árbol de carpetas: panel izquierdo (clic para el panel derecho)
 tooltip-tree-right = Árbol de carpetas: panel derecho (clic para ambos paneles)
@@ -388,3 +387,6 @@ copy-suffix = Copia
 # Toolbar: list / grid view
 tooltip-list-view = Vista de lista (Ctrl+1)
 tooltip-grid-view = Vista de cuadrícula (Ctrl+2)
+
+# The ★ button in each panel's bar
+tooltip-favorites = Favoritos (Ctrl+D)

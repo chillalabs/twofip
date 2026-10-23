@@ -70,7 +70,6 @@ status-selected = { $selected } de { $total } selecionados ({ $size })
 tooltip-back = Voltar (Alt+←)
 tooltip-forward = Avançar (Alt+→)
 tooltip-up = Pasta acima (Backspace)
-tooltip-drive = Unidade
 tooltip-tree-off = Árvore de pastas: oculta (clique para mostrá-la ao lado do painel esquerdo)
 tooltip-tree-left = Árvore de pastas: painel esquerdo (clique para o painel direito)
 tooltip-tree-right = Árvore de pastas: painel direito (clique para ambos os painéis)
@@ -388,3 +387,6 @@ copy-suffix = Cópia
 # Toolbar: list / grid view
 tooltip-list-view = Visualização em lista (Ctrl+1)
 tooltip-grid-view = Visualização em grade (Ctrl+2)
+
+# The ★ button in each panel's bar
+tooltip-favorites = Favoritos (Ctrl+D)
