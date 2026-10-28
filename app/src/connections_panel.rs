@@ -72,7 +72,7 @@ fn status_line<'a>(check: &Check, connected: bool) -> Element<'a, Message> {
 
 fn tool<'a>(icon: &'static str, tooltip: String, message: Option<Message>) -> Element<'a, Message> {
     themes::tooltip(
-        widget::button::icon(widget::icon::from_name(icon)).on_press_maybe(message),
+        widget::button::icon(crate::fallback_icons::named(icon)).on_press_maybe(message),
         widget::text(tooltip),
         widget::tooltip::Position::Top,
     )

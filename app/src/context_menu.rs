@@ -18,7 +18,7 @@ pub fn item_menu(
     can_paste: bool,
 ) -> Option<Vec<menu::Tree<PaneMessage>>> {
     let button = |label: String, icon_name: &'static str, action: Action| {
-        MenuItem::Button(label, Some(icon::from_name(icon_name).handle()), action)
+        MenuItem::Button(label, Some(crate::fallback_icons::named(icon_name)), action)
     };
 
     let mut items = vec![button(fl!("open"), "document-open-symbolic", Action::Open)];
@@ -124,7 +124,7 @@ pub fn background_menu(
     can_paste: bool,
 ) -> Option<Vec<menu::Tree<PaneMessage>>> {
     let button = |label: String, icon_name: &'static str, action: Action| {
-        MenuItem::Button(label, Some(icon::from_name(icon_name).handle()), action)
+        MenuItem::Button(label, Some(crate::fallback_icons::named(icon_name)), action)
     };
 
     let items = vec![

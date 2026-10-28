@@ -46,7 +46,7 @@ pub fn menu_bar<'a>(
     let button = |label: String, icon_name: &'static str, action: Action| {
         MenuItem::Button(
             label,
-            Some(icon::from_name(icon_name).handle()),
+            Some(crate::fallback_icons::named(icon_name)),
             TopMenuAction(action),
         )
     };
@@ -76,7 +76,7 @@ pub fn menu_bar<'a>(
         } else {
             MenuItem::ButtonDisabled(
                 fl!("disconnect"),
-                Some(icon::from_name("network-offline-symbolic").handle()),
+                Some(crate::fallback_icons::named("network-offline-symbolic")),
                 TopMenuAction(Action::Disconnect),
             )
         },
@@ -118,7 +118,7 @@ pub fn menu_bar<'a>(
     let check = |label: String, icon_name: &'static str, checked: bool, action: Action| {
         MenuItem::CheckBox(
             label,
-            Some(icon::from_name(icon_name).handle()),
+            Some(crate::fallback_icons::named(icon_name)),
             checked,
             TopMenuAction(action),
         )
@@ -206,14 +206,14 @@ pub fn menu_bar<'a>(
         separator(),
         // The view the panel already has is greyed out.
         tool(
-            icon::from_name("view-list-symbolic").handle(),
+            crate::fallback_icons::named("view-list-symbolic"),
             fl!("tooltip-list-view"),
             Action::ListView,
             !list_view,
         )
         .into(),
         tool(
-            icon::from_name("view-grid-symbolic").handle(),
+            crate::fallback_icons::named("view-grid-symbolic"),
             fl!("tooltip-grid-view"),
             Action::GridView,
             list_view,

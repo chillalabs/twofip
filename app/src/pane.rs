@@ -1300,7 +1300,7 @@ impl PaneState {
             .spacing(4)
             .align_y(cosmic::iced::Alignment::Center)
             .push(nav_button(
-                widget::icon::from_name("starred-symbolic").handle(),
+                crate::fallback_icons::named("starred-symbolic"),
                 fl!("tooltip-favorites"),
                 PaneMessage::ShowFavorites,
             ))

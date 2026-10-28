@@ -644,7 +644,7 @@ fn entry_context_menu(target: PaneId) -> Option<Vec<menu::Tree<Message>>> {
         ),
         MenuItem::Button(
             fl!("open-path-in-new-tab"),
-            Some(icon::from_name("tab-new-symbolic").handle()),
+            Some(crate::fallback_icons::named("tab-new-symbolic")),
             FolderSizeMenuAction::OpenInNewTab(target),
         ),
     ];

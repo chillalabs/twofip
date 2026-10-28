@@ -17,7 +17,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The built-in icons: (name, SVG).
-#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
 const ICONS: &[(&str, &[u8])] = &[
     (
         "accessories-text-editor-symbolic",
@@ -326,6 +325,18 @@ pub fn choose_theme() {
                 .is_some();
         THEMED_FILE_ICONS.store(themed, Ordering::Relaxed);
     }
+}
+
+/// The icon `name`. On Windows, libcosmic only has its own small built-in
+/// set, which lacks some of 2fip's icons (List / Grid view, the favorites
+/// star…): there 2fip's built-in copy is used. Elsewhere, the usual lookup
+/// (the icon theme, then the fallback folder).
+pub fn named(name: &str) -> cosmic::widget::icon::Handle {
+    #[cfg(windows)]
+    if let Some((_, svg)) = ICONS.iter().find(|(icon, _)| *icon == name) {
+        return cosmic::widget::icon::from_svg_bytes(*svg).symbolic(true);
+    }
+    cosmic::widget::icon::from_name(name).handle()
 }
 
 /// Whether the icon theme has file and folder icons.
