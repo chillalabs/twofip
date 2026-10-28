@@ -65,6 +65,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.20" date="2026-10-28">
+      <description>
+        <p>Windows fix:</p>
+        <ul>
+          <li>On Windows, the List view, Grid view and favorites star icons (and a few in the menus) are no longer blank</li>
+          <li>No changes to the Linux version</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.19" date="2026-10-23">
       <description>
         <p>Smoother dragging and a favorites button:</p>
