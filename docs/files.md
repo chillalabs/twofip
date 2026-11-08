@@ -22,7 +22,8 @@ details.
 ## Opening
 
 - **Folders:** double-click, <kbd>Enter</kbd> or <kbd>→</kbd>. Go back up
-  with <kbd>Backspace</kbd> or <kbd>←</kbd>; 2fip selects the folder you came
+  by double-clicking the **..** row at the top of the list, or with
+  <kbd>Backspace</kbd> or <kbd>←</kbd>; 2fip selects the folder you came
   from.
 - **Files:** double-click or <kbd>Enter</kbd> opens a file with its default
   app. If its type has **no default app yet**, 2fip shows **Open with…**

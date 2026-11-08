@@ -342,6 +342,55 @@ fn folder_svg(set: IconSet, dir: Option<UserDir>, color: Option<FolderColor>) ->
     }
 }
 
+/// The up arrow on the ".." entry's folder (around 24,29 like the special
+/// folders' symbols).
+const UP_ARROW: &str = r#"<path d="M24 36.5V22.5M17.5 28.5L24 22l6.5 6.5" stroke="{c}" stroke-width="{w}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>"#;
+
+fn up_arrow(color: &str, width: f32) -> String {
+    UP_ARROW
+        .replace("{c}", color)
+        .replace("{w}", &width.to_string())
+}
+
+/// The ".." entry (parent folder): the set's folder with an up arrow.
+fn parent_svg(set: IconSet) -> String {
+    match set {
+        IconSet::Vivid => folder_frame(
+            "",
+            &format!(
+                r##"<path d="{FOLDER_BACK}" fill="#D99A0B"/><path d="{FOLDER_FRONT}" fill="#FBBF24"/>{}"##,
+                up_arrow("#fff", 3.4)
+            ),
+        ),
+        IconSet::Classic => folder_frame(
+            &(gradient("front", "#ffd767", "#f7b731") + &gradient("back", "#e9a51a", "#d48c0c")),
+            &format!(
+                r##"<path d="{FOLDER_BACK}" fill="url(#back)"/><path d="{FOLDER_FRONT}" fill="url(#front)"/><circle cx="33" cy="33" r="12" fill="#3B82F6" stroke="#fff" stroke-width="1.6"/><g transform="translate(33 33) scale(.62) translate(-24 -29)">{}</g>"##,
+                up_arrow("#fff", 3.6)
+            ),
+        ),
+        IconSet::Soft => folder_frame(
+            &(gradient("front", "#8fcdfb", "#57aaf0") + &gradient("back", "#5eaaf0", "#3f8fde")),
+            &format!(
+                r##"<path d="{FOLDER_BACK}" fill="url(#back)"/><path d="{FOLDER_FRONT}" fill="url(#front)"/><path d="M7 16h34" stroke="#fff" stroke-opacity=".5" stroke-width="1.2" stroke-linecap="round"/><g opacity=".6">{}</g>"##,
+                up_arrow("#2a7fd0", 3.4)
+            ),
+        ),
+    }
+}
+
+/// The ".." entry in one color (Monochrome): a folder outline with an up
+/// arrow, drawn in the text color.
+fn parent_symbolic_svg() -> String {
+    folder_frame(
+        "",
+        &format!(
+            r##"<path d="{FOLDER_BACK}" fill="none" stroke="#000" stroke-width="2.6" stroke-linejoin="round"/>{}"##,
+            up_arrow("#000", 3.2)
+        ),
+    )
+}
+
 /// A folder's SVG, moved up 3 units: its front (the part the eye sees)
 /// sits low under the tab, so without this it looks lower than file icons
 /// and the text next to it.
@@ -358,6 +407,8 @@ enum Key {
     Folder(IconSet, Option<UserDir>, Option<FolderColor>),
     File(IconSet, FileCategory),
     Swatch(FolderColor),
+    Parent(IconSet),
+    ParentSymbolic,
 }
 
 /// Icon handles are built once and shared (they hold the SVG data).
@@ -371,6 +422,8 @@ fn cached(key: Key) -> icon::Handle {
             let svg = match key {
                 Key::Folder(set, dir, color) => folder_svg(set, dir, color),
                 Key::File(set, category) => file_svg(set, category),
+                Key::Parent(set) => parent_svg(set),
+                Key::ParentSymbolic => parent_symbolic_svg(),
                 Key::Swatch(color) => svg(
                     "",
                     &format!(
@@ -388,6 +441,15 @@ fn cached(key: Key) -> icon::Handle {
 /// user picked replaces the set's folder color.
 pub fn folder(set: IconSet, dir: Option<UserDir>, color: Option<FolderColor>) -> icon::Handle {
     cached(Key::Folder(set, dir, color))
+}
+
+/// The ".." entry's icon: `None` for the one-color (Monochrome) version,
+/// which follows the text color.
+pub fn parent_folder(set: Option<IconSet>) -> icon::Handle {
+    match set {
+        Some(set) => cached(Key::Parent(set)),
+        None => cached(Key::ParentSymbolic).symbolic(true),
+    }
 }
 
 /// A round sample of `color`, for the Folder color menu.
@@ -482,6 +544,7 @@ mod tests {
                     Some(UserDir::Documents),
                     Some(FolderColor::Red),
                 )])
+                .chain([parent_svg(set), parent_symbolic_svg()])
                 .chain(CATEGORIES.iter().map(|category| file_svg(set, *category)));
             for svg in svgs {
                 assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));

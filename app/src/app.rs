@@ -3823,7 +3823,6 @@ impl Application for App {
             quick_view: self.quick_view.is_some(),
             can_back: pane.can_go_back(),
             can_forward: pane.can_go_forward(),
-            can_up: pane.can_go_up(),
         };
         menu_bar(
             &self.keybinds,

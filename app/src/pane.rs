@@ -950,6 +950,12 @@ impl PaneState {
         let Some((position, count)) = selected else {
             return Task::none();
         };
+        // The ".." row sits above the files.
+        let (position, count) = if self.can_go_up() {
+            (position + 1, count + 1)
+        } else {
+            (position, count)
+        };
         let y = if count > 1 {
             position as f32 / (count - 1) as f32
         } else {
@@ -1357,19 +1363,24 @@ impl PaneState {
                                         let keybinds = keybinds.clone();
                                         let scroll_id = scroll_id.clone();
                                         widget::responsive(move |area| {
-                                            widget::scrollable(crate::marquee::marquee(
-                                                list_view(
-                                                    self,
-                                                    t,
-                                                    widths,
-                                                    select_mode,
-                                                    &keybinds,
-                                                    can_paste,
-                                                ),
-                                                1,
-                                                scroll_content_height(area.height),
-                                                PaneMessage::Marquee,
-                                            ))
+                                            widget::scrollable(
+                                                widget::Column::new()
+                                                    .push_maybe(parent_row(self, t, false))
+                                                    .push(crate::marquee::marquee(
+                                                        list_view(
+                                                            self,
+                                                            t,
+                                                            widths,
+                                                            select_mode,
+                                                            &keybinds,
+                                                            can_paste,
+                                                        ),
+                                                        1,
+                                                        scroll_content_height(area.height)
+                                                            - parent_row_height(self, false),
+                                                        PaneMessage::Marquee,
+                                                    )),
+                                            )
                                             .id(scroll_id.clone())
                                             .height(Length::Fill)
                                             .into()
@@ -1384,19 +1395,24 @@ impl PaneState {
                             let keybinds = keybinds.clone();
                             let scroll_id = self.scroll_id.clone();
                             widget::responsive(move |size| {
-                                widget::scrollable(crate::marquee::marquee(
-                                    grid_view(
-                                        self,
-                                        t,
-                                        size.width,
-                                        select_mode,
-                                        &keybinds,
-                                        can_paste,
-                                    ),
-                                    2,
-                                    scroll_content_height(size.height),
-                                    PaneMessage::Marquee,
-                                ))
+                                widget::scrollable(
+                                    widget::Column::new()
+                                        .push_maybe(parent_row(self, t, true))
+                                        .push(crate::marquee::marquee(
+                                            grid_view(
+                                                self,
+                                                t,
+                                                size.width,
+                                                select_mode,
+                                                &keybinds,
+                                                can_paste,
+                                            ),
+                                            2,
+                                            scroll_content_height(size.height)
+                                                - parent_row_height(self, true),
+                                            PaneMessage::Marquee,
+                                        )),
+                                )
                                 .id(scroll_id.clone())
                                 .height(Length::Fill)
                                 .into()
@@ -1888,6 +1904,97 @@ fn resized(start: ColumnWidths, columns: &[Column], divider: usize, dx: f32) -> 
 /// List view: one row per entry with fixed columns; every cell stays on one
 /// line and ends in "…" instead of running into the next column. Click
 /// selects (Ctrl adds), double-click opens, right-click shows the menu.
+/// Total Commander's ".." entry, above the files (list) or as the first
+/// tile (grid): a double-click goes up to the parent folder, and files
+/// dropped on it go there. It isn't part of the listing, so it's never
+/// selected, copied, counted or dragged. `None` at the top folder.
+fn parent_row<'a>(
+    pane: &'a PaneState,
+    tab_state: &'a TabState,
+    grid: bool,
+) -> Option<Element<'a, PaneMessage>> {
+    if !pane.can_go_up() {
+        return None;
+    }
+    let font_size = pane.options.font_size;
+    let icon = parent_entry_icon(pane.options.icon_style);
+    let content: Element<'a, PaneMessage> = if grid {
+        widget::container(
+            widget::Column::new()
+                .spacing(4)
+                .align_x(cosmic::iced::Alignment::Center)
+                .width(Length::Fill)
+                .push(widget::icon(icon.clone()).size(GRID_ICON_SIZE))
+                .push(name_text("..".to_string(), font_size)),
+        )
+        .padding(6)
+        .width(Length::Fixed(GRID_CELL_WIDTH))
+        .into()
+    } else {
+        widget::container(
+            widget::Row::new()
+                .spacing(8)
+                .align_y(cosmic::iced::Alignment::Center)
+                .push(widget::icon(icon).size(list_icon_size(font_size)))
+                .push(one_line("..".to_string(), font_size)),
+        )
+        .padding([row_padding_y(font_size), LIST_ROW_PADDING_X])
+        .width(Length::Fill)
+        .into()
+    };
+    let area = widget::mouse_area(content)
+        .on_double_click(PaneMessage::GoUp)
+        .interaction(cosmic::iced::mouse::Interaction::Pointer);
+    // Files dropped on ".." go to the parent folder (not into search
+    // results or archives).
+    let parent = fs_ops::vfs::parent(&tab_state.current_dir)
+        .filter(|_| tab_state.results.is_none() && !tab_read_only(tab_state));
+    let row: Element<'a, PaneMessage> = match parent {
+        Some(parent) => drop_target(area, parent, true),
+        None => area.into(),
+    };
+    Some(if pane.options.row_lines && !grid {
+        widget::Column::new()
+            .push(row)
+            .push(widget::divider::horizontal::light())
+            .into()
+    } else {
+        row
+    })
+}
+
+/// The ".." entry's icon in the chosen icon style: 2fip's folder with an
+/// up arrow (Vivid's for the icon theme, which has none of its own), or a
+/// one-color outline for Monochrome.
+fn parent_entry_icon(style: fs_ops::settings::IconStyle) -> widget::icon::Handle {
+    use crate::icon_sets::IconSet;
+    use fs_ops::settings::IconStyle;
+    crate::icon_sets::parent_folder(match style {
+        IconStyle::Vivid | IconStyle::Colorful => Some(IconSet::Vivid),
+        IconStyle::Classic => Some(IconSet::Classic),
+        IconStyle::Soft => Some(IconSet::Soft),
+        IconStyle::Monochrome => None,
+    })
+}
+
+/// About how tall the ".." row is (0 when it isn't shown), so the files'
+/// area below it doesn't make a short folder scroll.
+fn parent_row_height(pane: &PaneState, grid: bool) -> f32 {
+    if !pane.can_go_up() {
+        return 0.0;
+    }
+    let font_size = pane.options.font_size;
+    let text = f32::from(font_size.px()) * 1.5;
+    if grid {
+        f32::from(GRID_ICON_SIZE) + 4.0 + text + 12.0
+    } else {
+        let lines = if pane.options.row_lines { 1.0 } else { 0.0 };
+        f32::from(list_icon_size(font_size)).max(text)
+            + 2.0 * f32::from(row_padding_y(font_size))
+            + lines
+    }
+}
+
 fn list_view<'a>(
     pane: &'a PaneState,
     tab_state: &'a TabState,
@@ -2466,16 +2573,6 @@ fn tab_read_only(tab_state: &TabState) -> bool {
 
 pub fn home_dir() -> PathBuf {
     fs_ops::sandbox::home_dir()
-}
-
-/// "Up one level" arrow (left, then up). The icon theme has no such icon, so it ships
-/// with the app; drawn as a symbolic icon so it follows the theme's colors.
-pub fn parent_folder_icon() -> widget::icon::Handle {
-    let mut handle = widget::icon::from_svg_bytes(
-        &include_bytes!("../resources/icons/go-parent-folder-symbolic.svg")[..],
-    );
-    handle.symbolic = true;
-    handle
 }
 
 /// Limits how many thumbnails are loaded or generated at the same time, so a

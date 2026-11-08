@@ -221,7 +221,7 @@ pub fn menu_bar<'a>(
         .into(),
         tree_button(tools.folder_tree),
         separator(),
-        // Back, Forward and Up act on the active panel.
+        // Back and Forward act on the active panel (Up is the ".." row).
         tool(
             icon::from_name("go-previous-symbolic").handle(),
             fl!("tooltip-back"),
@@ -234,13 +234,6 @@ pub fn menu_bar<'a>(
             fl!("tooltip-forward"),
             Action::GoForward,
             tools.can_forward,
-        )
-        .into(),
-        tool(
-            crate::pane::parent_folder_icon(),
-            fl!("tooltip-up"),
-            Action::GoUp,
-            tools.can_up,
         )
         .into(),
         separator(),
@@ -295,10 +288,9 @@ pub struct Tools {
     pub can_extract: bool,
     pub folder_tree: fs_ops::settings::TreeMode,
     pub quick_view: bool,
-    /// The active panel has somewhere to go back / forward / up to.
+    /// The active panel has somewhere to go back / forward to.
     pub can_back: bool,
     pub can_forward: bool,
-    pub can_up: bool,
 }
 
 /// "Show hierarchy": its icon shows which panels have the folder tree, and

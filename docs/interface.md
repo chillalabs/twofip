@@ -23,7 +23,6 @@ Next to the menus are the tool buttons, in groups:
 | **List view** (<kbd>Ctrl</kbd>+<kbd>1</kbd>) / **Grid view** (<kbd>Ctrl</kbd>+<kbd>2</kbd>) | the active panel's view; the current one is greyed out |
 | **Folder tree** | shows the folder tree beside the left panel, the right, both, or none, in turn |
 | **Back** (<kbd>Alt</kbd>+<kbd>←</kbd>) / **Forward** (<kbd>Alt</kbd>+<kbd>→</kbd>) | through the active panel's history |
-| **Up** (<kbd>Backspace</kbd>) | the active panel's parent folder |
 | **Find files** (<kbd>Ctrl</kbd>+<kbd>F</kbd>) | searches by name (see [Finding files](find.html)) |
 | **Folder Size** | what fills a folder or a drive (see [Folder Size](folder-size.html)) |
 | **Connections** | saved and open server connections |
@@ -31,7 +30,9 @@ Next to the menus are the tool buttons, in groups:
 | **Extract files** (<kbd>Alt</kbd>+<kbd>F9</kbd>) | unpacks the selected archives into the other panel's folder |
 
 A button that can't act right now is greyed out: for example **Extract files**
-only works when an archive is selected, and **Back** when there's no history. See
+only works when an archive is selected, and **Back** when there's no history.
+To go **up** a folder, double-click the **..** row at the top of the list, or
+press <kbd>Backspace</kbd>. See
 [Working with files](files.html#archives) for packing and extracting.
 
 ## The two panels
@@ -48,7 +49,9 @@ Each panel has, from top to bottom:
    [favorites](favorites.html), the **drive menu** (see below), **+** for a
    new tab, and the **path bar**. (Back, Forward and Up are in the toolbar at the top and
    act on the active panel.)
-3. **The file list**, in list or grid view.
+3. **The file list**, in list or grid view. Its first row, **..** (with an
+   up arrow), is the parent folder: double-click it to go up, or drop files
+   on it to put them there. It's never selected or copied with the files.
 4. **The status line:** how many items the folder has, or how many are
    selected and their total size.
 
