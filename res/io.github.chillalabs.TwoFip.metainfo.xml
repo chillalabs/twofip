@@ -65,6 +65,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.21" date="2026-11-08">
+      <description>
+        <p>The ".." entry, as in Total Commander:</p>
+        <ul>
+          <li>The first row of every folder is "..": double-click it to go up, or drop files on it to put them in the parent folder</li>
+          <li>Its icon follows the icon style: a folder with an up arrow</li>
+          <li>The toolbar's Up button moved into the list</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.20" date="2026-10-28">
       <description>
         <p>Windows fix:</p>
