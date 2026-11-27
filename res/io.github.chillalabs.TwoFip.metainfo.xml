@@ -65,6 +65,15 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.2.22" date="2026-11-27">
+      <description>
+        <p>Keyboard scrolling like Total Commander:</p>
+        <ul>
+          <li>PageUp and PageDown move a screen of files; with Shift they select</li>
+          <li>The arrow keys move the cursor freely; the list only scrolls when it comes within five files of the edge</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.21" date="2026-11-08">
       <description>
         <p>The ".." entry, as in Total Commander:</p>
