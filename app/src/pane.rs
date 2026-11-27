@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use cosmic::app::Task;
-use cosmic::iced::widget::scrollable::{snap_to, RelativeOffset};
+use cosmic::iced::widget::scrollable::{scroll_to, snap_to, AbsoluteOffset, RelativeOffset};
 use cosmic::iced::Length;
 use cosmic::widget::menu::key_bind::KeyBind;
 use cosmic::widget::{self, segmented_button, table};
@@ -136,6 +136,13 @@ pub enum PaneMessage {
     /// Keyboard cursor: select the next / previous row.
     SelectNext,
     SelectPrevious,
+    /// PageUp / PageDown (`forward`), extending the selection with Shift.
+    SelectPage {
+        forward: bool,
+        extend: bool,
+    },
+    /// The file list's scroll area was drawn or scrolled.
+    Scrolled(ListViewport),
     /// Enters the selected folder (does nothing for files).
     EnterSelectedFolder,
     /// Ctrl+S: shows the quick filter bar (if hidden) and focuses it.
@@ -174,6 +181,32 @@ struct ColumnResize {
     start: ColumnWidths,
 }
 
+/// The file list's scroll area: where it's scrolled to, how big it is, and
+/// how tall its content is. The scroll area reports it once its content is
+/// taller than it (else nothing needs scrolling).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ListViewport {
+    offset: f32,
+    height: f32,
+    width: f32,
+    content: f32,
+}
+
+impl ListViewport {
+    fn of(viewport: cosmic::iced::widget::scrollable::Viewport) -> Self {
+        Self {
+            offset: viewport.absolute_offset().y,
+            height: viewport.bounds().height,
+            width: viewport.bounds().width,
+            content: viewport.content_bounds().height,
+        }
+    }
+}
+
+/// How many rows the cursor keeps from the top and bottom edges before the
+/// list scrolls, as in Total Commander.
+const SCROLL_MARGIN_ROWS: usize = 5;
+
 pub struct PaneState {
     id: PaneId,
     tabs: segmented_button::SingleSelectModel,
@@ -184,6 +217,9 @@ pub struct PaneState {
     /// A plain press on an already selected entry (see
     /// [`PaneMessage::EntryPressedInSelection`]).
     pressed_in_selection: Option<table::Entity>,
+    /// The file list's scroll area as last drawn (`None` until it reports,
+    /// or while a new listing hasn't been drawn yet).
+    viewport: Option<ListViewport>,
     /// The quick filter's text box, so Ctrl+S can focus it.
     filter_input_id: widget::Id,
     /// The path bar's text while it's being edited (`None`: showing the
@@ -243,6 +279,7 @@ impl PaneState {
             options,
             scroll_id: widget::Id::unique(),
             pressed_in_selection: None,
+            viewport: None,
             filter_input_id: widget::Id::unique(),
             path_edit: None,
             path_edit_error: None,
@@ -312,6 +349,7 @@ impl PaneState {
                 }
                 let selected = tab_state.apply_pending_select();
                 let scroll = if self.tabs.is_active(tab) {
+                    self.viewport = None;
                     self.scroll_to_row(selected)
                 } else {
                     Task::none()
@@ -528,6 +566,25 @@ impl PaneState {
                 }
                 Task::none()
             }
+            PaneMessage::Scrolled(viewport) => {
+                self.viewport = Some(viewport);
+                Task::none()
+            }
+            PaneMessage::SelectPage { forward, extend } => {
+                let page = self.page_rows() as isize;
+                let rows = if forward { page } else { -page };
+                let selected = self
+                    .tabs
+                    .active_data_mut::<TabState>()
+                    .and_then(|tab_state| {
+                        if extend {
+                            tab_state.extend_selection_by(rows)
+                        } else {
+                            tab_state.move_selection_by(rows)
+                        }
+                    });
+                self.scroll_to_row(selected)
+            }
             PaneMessage::SelectNext | PaneMessage::SelectPrevious => {
                 let forward = matches!(message, PaneMessage::SelectNext);
                 let selected = self
@@ -562,6 +619,7 @@ impl PaneState {
                         // Keep a row selected so Enter / arrows act on a match.
                         tab_state.ensure_selection()
                     });
+                self.viewport = None;
                 self.scroll_to_row(selected)
             }
             PaneMessage::CloseFilter => {
@@ -942,30 +1000,97 @@ impl PaneState {
         }
     }
 
-    /// Scrolls the listing so row `position` (of `count`) is visible.
-    ///
-    /// Snapping to the row's *relative* position always keeps it on screen
-    /// (first row at the top, last at the bottom) without knowing row heights.
-    fn scroll_to_row(&self, selected: Option<(usize, usize)>) -> Task<Message> {
+    /// The list's lines as last drawn: entries per line (1 in the list, the
+    /// columns in the grid), where the first line starts (below "..") and a
+    /// line's height. `None` while the content fits (or isn't known yet).
+    fn line_geometry(&self) -> Option<(usize, f32, f32)> {
+        let viewport = self.viewport?;
+        let tab_state = self.tabs.active_data::<TabState>()?;
+        let count = tab_state.entries.iter().count();
+        if count == 0 || viewport.content <= viewport.height + 0.5 {
+            return None;
+        }
+        let grid = tab_state.view_mode == ViewMode::Grid;
+        let per_line = if grid {
+            grid_columns(viewport.width)
+        } else {
+            1
+        };
+        let lines = count.div_ceil(per_line);
+        let top = parent_row_height(self, grid);
+        let line = (viewport.content - top) / lines as f32;
+        (line > 0.0).then_some((per_line, top, line))
+    }
+
+    /// PageUp / PageDown: how many entries a screen holds (one line less,
+    /// so the last one stays in view); everything when it all fits.
+    fn page_rows(&self) -> usize {
+        match (self.line_geometry(), self.viewport) {
+            (Some((per_line, _, line)), Some(viewport)) => {
+                let visible = (viewport.height / line).floor() as usize;
+                visible.saturating_sub(1).max(1) * per_line
+            }
+            _ => usize::MAX / 2,
+        }
+    }
+
+    /// Keeps row `position` in view the way Total Commander does: the list
+    /// only scrolls when the cursor comes within [`SCROLL_MARGIN_ROWS`] of
+    /// the top or bottom edge (or reaches the first or last row).
+    fn scroll_to_row(&mut self, selected: Option<(usize, usize)>) -> Task<Message> {
         let Some((position, count)) = selected else {
             return Task::none();
         };
-        // The ".." row sits above the files.
-        let (position, count) = if self.can_go_up() {
-            (position + 1, count + 1)
-        } else {
-            (position, count)
+        let (Some((per_line, top, line)), Some(viewport)) = (self.line_geometry(), self.viewport)
+        else {
+            // Not drawn yet (a new listing): snap to the row's relative
+            // position, which always shows it without knowing row heights.
+            // The ".." row sits above the files.
+            let (position, count) = if self.can_go_up() {
+                (position + 1, count + 1)
+            } else {
+                (position, count)
+            };
+            let y = if count > 1 {
+                position as f32 / (count - 1) as f32
+            } else {
+                0.0
+            };
+            return snap_to(
+                self.scroll_id.clone(),
+                RelativeOffset {
+                    x: None,
+                    y: Some(y),
+                },
+            );
         };
-        let y = if count > 1 {
-            position as f32 / (count - 1) as f32
-        } else {
+        let visible = (viewport.height / line).floor() as usize;
+        let margin = SCROLL_MARGIN_ROWS.min(visible.saturating_sub(1) / 2) as f32 * line;
+        // The first line also shows ".." above it.
+        let row = position / per_line;
+        let row_top = if row == 0 {
             0.0
+        } else {
+            top + row as f32 * line
         };
-        snap_to(
+        let row_bottom = top + (row + 1) as f32 * line;
+        let target = if row_top - margin < viewport.offset {
+            row_top - margin
+        } else if row_bottom + margin > viewport.offset + viewport.height {
+            row_bottom + margin - viewport.height
+        } else {
+            return Task::none();
+        };
+        let target = target.clamp(0.0, (viewport.content - viewport.height).max(0.0));
+        // Held-down keys come faster than redraws: count on the new place.
+        if let Some(viewport) = &mut self.viewport {
+            viewport.offset = target;
+        }
+        scroll_to(
             self.scroll_id.clone(),
-            RelativeOffset {
+            AbsoluteOffset {
                 x: None,
-                y: Some(y),
+                y: Some(target),
             },
         )
     }
@@ -1382,6 +1507,9 @@ impl PaneState {
                                                     )),
                                             )
                                             .id(scroll_id.clone())
+                                            .on_scroll(|viewport| {
+                                                PaneMessage::Scrolled(ListViewport::of(viewport))
+                                            })
                                             .height(Length::Fill)
                                             .into()
                                         })
@@ -1414,6 +1542,9 @@ impl PaneState {
                                         )),
                                 )
                                 .id(scroll_id.clone())
+                                .on_scroll(|viewport| {
+                                    PaneMessage::Scrolled(ListViewport::of(viewport))
+                                })
                                 .height(Length::Fill)
                                 .into()
                             })

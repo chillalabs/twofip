@@ -346,14 +346,38 @@ impl TabState {
     /// it starts at the first row. Returns the new row's position and the row
     /// count.
     pub fn move_selection(&mut self, forward: bool) -> Option<(usize, usize)> {
+        self.move_selection_by(if forward { 1 } else { -1 })
+    }
+
+    /// Moves the cursor `rows` rows (negative: up), stopping at the first
+    /// or last row, selecting only that row (PageUp / PageDown).
+    pub fn move_selection_by(&mut self, rows: isize) -> Option<(usize, usize)> {
         let order: Vec<table::Entity> = self.entries.iter().collect();
         let count = order.len();
-        let target = match self.cursor_position(&order, forward) {
-            Some(cursor) if forward => (cursor + 1).min(count.checked_sub(1)?),
-            Some(cursor) => cursor.saturating_sub(1),
+        let target = match self.cursor_position(&order, rows > 0) {
+            Some(cursor) => step(cursor, rows, count)?,
             None => 0,
         };
         self.select_only(*order.get(target)?);
+        Some((target, count))
+    }
+
+    /// Shift+PageUp / PageDown: selects from the anchor to `rows` rows
+    /// from the cursor.
+    pub fn extend_selection_by(&mut self, rows: isize) -> Option<(usize, usize)> {
+        let order: Vec<table::Entity> = self.entries.iter().collect();
+        let count = order.len();
+        let Some(cursor) = self.cursor_position(&order, rows > 0) else {
+            self.select_only(*order.first()?);
+            return Some((0, count));
+        };
+        let anchor = self
+            .position_of(&order, self.anchor.as_ref())
+            .unwrap_or(cursor);
+        let target = step(cursor, rows, count)?;
+        self.select_range(&order, anchor, target);
+        self.anchor = self.path_of(order[anchor]);
+        self.cursor = self.path_of(order[target]);
         Some((target, count))
     }
 
@@ -454,6 +478,12 @@ fn compare_items(
     })
 }
 
+/// `cursor` moved `rows` rows within `count`, stopping at the ends.
+fn step(cursor: usize, rows: isize, count: usize) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    Some(cursor.saturating_add_signed(rows).min(last))
+}
+
 pub fn tab_label(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -503,6 +533,15 @@ fn wildcard_match(pattern: &[char], text: &[char]) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn page_moves_stop_at_the_first_and_last_row() {
+        assert_eq!(super::step(10, 20, 100), Some(30));
+        assert_eq!(super::step(90, 20, 100), Some(99));
+        assert_eq!(super::step(5, -20, 100), Some(0));
+        assert_eq!(super::step(0, 1, 0), None);
+    }
+
     use std::collections::HashMap;
     use std::sync::Arc;
 

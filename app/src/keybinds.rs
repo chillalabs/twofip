@@ -36,6 +36,12 @@ pub enum Action {
     /// Shift+↓ / Shift+↑: grow or shrink the selection by one row.
     ExtendSelectionDown,
     ExtendSelectionUp,
+    /// PageUp / PageDown: the cursor moves a screen of files.
+    PageUp,
+    PageDown,
+    /// Shift+PageUp / PageDown: the selection grows by a screen.
+    ExtendPageUp,
+    ExtendPageDown,
     /// Space: calculate the total size of the selected folders.
     CalculateSize,
     /// Shows the selected folder's contents and recursive sizes in the other pane.
@@ -221,6 +227,18 @@ pub fn default_keybinds() -> HashMap<KeyBind, Action> {
         &[Modifier::Shift],
         Key::Named(Named::ArrowUp),
         Action::ExtendSelectionUp,
+    );
+    bind(&[], Key::Named(Named::PageUp), Action::PageUp);
+    bind(&[], Key::Named(Named::PageDown), Action::PageDown);
+    bind(
+        &[Modifier::Shift],
+        Key::Named(Named::PageUp),
+        Action::ExtendPageUp,
+    );
+    bind(
+        &[Modifier::Shift],
+        Key::Named(Named::PageDown),
+        Action::ExtendPageDown,
     );
     // Space arrives as the character " " (there is no named Space key).
     bind(&[], Key::Character(" ".into()), Action::CalculateSize);

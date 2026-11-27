@@ -31,6 +31,7 @@ panel unless a dialog or a side panel is open.
 | <kbd>Tab</kbd> | Switch to the other panel |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Previous / next item |
 | <kbd>Home</kbd> / <kbd>End</kbd> | First / last item |
+| <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | One screen up / down (with <kbd>Shift</kbd>: select) |
 | <kbd>Enter</kbd> | Open the selected file or folder (archives open like folders) |
 | <kbd>→</kbd> | Enter the selected folder |
 | <kbd>Backspace</kbd>, <kbd>←</kbd> | Parent folder |

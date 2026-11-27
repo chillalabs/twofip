@@ -709,6 +709,7 @@ impl App {
                     msg,
                     PaneMessage::DirLoaded(..)
                         | PaneMessage::TreeLoaded(..)
+                        | PaneMessage::Scrolled(..)
                         | PaneMessage::DropHover(..)
                         | PaneMessage::DropLeave { .. }
                 ) {
@@ -2087,6 +2088,12 @@ impl App {
             Action::SelectPrevious => self
                 .pane_mut(self.active_pane)
                 .update(PaneMessage::SelectPrevious),
+            Action::PageUp | Action::PageDown | Action::ExtendPageUp | Action::ExtendPageDown => {
+                let forward = matches!(action, Action::PageDown | Action::ExtendPageDown);
+                let extend = matches!(action, Action::ExtendPageUp | Action::ExtendPageDown);
+                self.pane_mut(self.active_pane)
+                    .update(PaneMessage::SelectPage { forward, extend })
+            }
             Action::QuickFilter => self
                 .pane_mut(self.active_pane)
                 .update(PaneMessage::OpenFilter),
